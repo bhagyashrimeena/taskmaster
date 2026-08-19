@@ -1,0 +1,7 @@
+fastapi>=0.141,<1
+google-adk[mcp]==2.5.0
+pydantic-settings>=2.10,<3
+python-dotenv>=1,<2
+uvicorn[standard]>=0.52,<1
+pytest>=8,<10
+pytest-asyncio>=1,<2

@@ -1,0 +1,67 @@
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+backend/.env
+frontend/.env.local
+
+# Python environments and generated files
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Node and Next.js output
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/tsconfig.tsbuildinfo
+
+# Runtime caches, local state, logs, and generated media
+.cache/
+backend/.cache/
+frontend/.turbo/
+frontend/.vercel/
+frontend/coverage/
+coverage/
+test-results/
+playwright-report/
+playwright/.cache/
+*.log
+*.sqlite
+*.sqlite3
+*.db
+*.wav
+*.tmp
+artifacts/
+
+# Temporary, backup, and editor-generated files
+*.bak
+*.backup
+*.old
+*.orig
+*.rej
+*~
+.history/
+.fleet/
+
+# Local planning and agent-context files
+context v1.md
+copilot.md
+frontend/AGENTS.md
+frontend/CLAUDE.md
+
+# IDE and operating-system files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Local diagnostic outputs
+zerodha-spike-results.json
