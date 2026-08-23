@@ -2,7 +2,7 @@
 
 import asyncio
 from datetime import date, datetime
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 import json
 import logging
 import uuid
@@ -27,10 +27,15 @@ logger = logging.getLogger(__name__)
 
 
 def _decimal(value: Any, default: str = "0") -> Decimal:
-    try:
-        return Decimal(str(value if value is not None else default))
-    except (ValueError, TypeError, ArithmeticError):
+    if value is None:
         return Decimal(default)
+    try:
+        parsed = Decimal(str(value))
+    except (InvalidOperation, ValueError, TypeError, ArithmeticError) as exc:
+        raise PortfolioProviderError(f"Invalid numeric portfolio value: {value!r}") from exc
+    if not parsed.is_finite():
+        raise PortfolioProviderError(f"Non-finite numeric portfolio value: {value!r}")
+    return parsed
 
 
 class ZerodhaPortfolioProvider(PortfolioProvider):

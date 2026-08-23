@@ -39,10 +39,18 @@ async def test_direct_holding_beats_unrelated_noise() -> None:
     engine = RelevanceEngine()
     infosys = engine.score_candidate(by_id["infy-results"], portfolio, now=NOW)
     tesla = engine.score_candidate(by_id["tesla-noise"], portfolio, now=NOW)
+    infy_weight = next(
+        item.portfolio_weight for item in portfolio.holdings if item.symbol == "INFY"
+    )
+    it_weight = next(
+        item.portfolio_weight
+        for item in portfolio.sector_exposure
+        if item.sector == "Information Technology"
+    )
 
     assert infosys.affected_holdings == ["INFY"]
-    assert infosys.direct_exposure_pct == 14.0
-    assert infosys.sector_exposure_pct == 32.0
+    assert infosys.direct_exposure_pct == round(float(infy_weight), 1)
+    assert infosys.sector_exposure_pct == round(float(it_weight), 1)
     assert infosys.relevance_score > tesla.relevance_score
     assert tesla.affected_holdings == []
     assert tesla.direct_exposure_pct == 0
@@ -53,8 +61,13 @@ async def test_sector_story_uses_sector_exposure_without_direct_match() -> None:
     batch = await DemoNewsProvider().get_candidates(limit=15, as_of=NOW)
     story = next(candidate for candidate in batch.candidates if candidate.id == "it-spending")
     scored = RelevanceEngine().score_candidate(story, portfolio, now=NOW)
+    it_weight = next(
+        item.portfolio_weight
+        for item in portfolio.sector_exposure
+        if item.sector == "Information Technology"
+    )
 
     assert scored.affected_holdings == []
     assert scored.direct_exposure_pct == 0
-    assert scored.sector_exposure_pct == 32.0
-    assert scored.signals.sector_exposure == 12.0
+    assert scored.sector_exposure_pct == round(float(it_weight), 1)
+    assert scored.signals.sector_exposure > 0

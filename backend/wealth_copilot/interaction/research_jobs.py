@@ -2,6 +2,7 @@
 
 import asyncio
 from datetime import datetime, timezone
+import logging
 from threading import RLock
 from uuid import uuid4
 
@@ -13,6 +14,9 @@ from .schemas import (
     ResearchStatus,
 )
 from .service import InteractionService, interaction_service
+
+
+logger = logging.getLogger(__name__)
 
 
 class ResearchJobManager:
@@ -67,6 +71,7 @@ class ResearchJobManager:
                 )
                 job.completed_at = datetime.now(timezone.utc)
         except Exception:
+            logger.exception("Research job failed: %s", job_id)
             with self._lock:
                 job = self._jobs[job_id]
                 job.status = ResearchStatus.FAILED
@@ -77,6 +82,21 @@ class ResearchJobManager:
         with self._lock:
             job = self._jobs.get(job_id)
             return job.model_copy(deep=True) if job else None
+
+    async def clear(self) -> None:
+        """Cancel queued work and discard jobs from the previous scenario/run."""
+
+        with self._lock:
+            tasks = list(self._tasks)
+            self._jobs.clear()
+            self._targets.clear()
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        with self._lock:
+            self._tasks.clear()
 
     def latest_for(
         self, *, story_id: str | None = None, event_id: str | None = None

@@ -33,9 +33,9 @@ company-specific move before deciding whether to investigate or alert.
 ## Deterministic fixtures
 
 Ten fixtures cover all four outcomes. The hero fixture is
-`hdfc-bank-sudden-fall`: HDFCBANK -5.4%, banking sector -0.8%, 18.01% direct
-portfolio exposure, 28.01% financial-sector exposure, two investigated
-developments, relevance 94.21, decision `ALERT`.
+`hdfc-bank-sudden-fall`: HDFCBANK -5.4%, banking sector -0.8%, 17.21% direct
+portfolio exposure, 27.26% financial-sector exposure, two investigated
+developments, relevance 93.11, decision `ALERT`.
 
 ## Run
 
@@ -53,4 +53,3 @@ python scripts\phase2_acceptance.py
 
 The core engine and fixtures run offline. Only the TaskMaster's conversational
 rendering uses Gemini.
-

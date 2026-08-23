@@ -1,13 +1,12 @@
 """Source-first Research Agent used only for explicit deeper investigation."""
 
-from datetime import date
 from typing import Any
 
 from google.adk.agents import Agent
 from google.adk.tools import google_search
 from google.genai import types
 
-from ..config import get_settings
+from ..config import application_today, get_settings
 
 
 settings = get_settings()
@@ -54,7 +53,7 @@ def create_research_agent() -> Agent:
         model=settings.adk_model,
         description="Performs an explicit, deeper, source-first investigation for Learn More.",
         instruction=(
-            f"You are Wealth Copilot's Research Agent. Today is {date.today().isoformat()}. {method} "
+            f"You are Wealth Copilot's Research Agent. Today is {application_today().isoformat()}. {method} "
             "Prioritize sources in this order: company or exchange disclosures; RBI, SEBI, or another "
             "official authority; established financial reporting; secondary analysis. Separate the answer "
             "into Facts, Context / interpretation, What remains uncertain, and Sources. Every source must "
@@ -68,4 +67,3 @@ def create_research_agent() -> Agent:
 
 
 research_agent = create_research_agent()
-

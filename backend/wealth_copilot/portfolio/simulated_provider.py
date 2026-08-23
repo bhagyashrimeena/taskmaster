@@ -1,27 +1,215 @@
-"""Scenario-driven portfolio provider for safe, repeatable demonstrations."""
+"""Canonical demo portfolio backed by repeatable scenario market values."""
 
+from collections import defaultdict
 from datetime import date, datetime, time
 from decimal import Decimal
 
 from ..simulation import simulation_service
 from .provider import PortfolioProvider
-from .schemas import HistoricalCandle, Holding, Position, Profile, Quote
-
-
-_ROWS = (
-    ("HDFCBANK", "Financial Services", "75", "1680", "2021.60"),
-    ("RELIANCE", "Energy", "100", "1260", "1431.40"),
-    ("INFY", "Information Technology", "80", "1325", "1473.50"),
-    ("TCS", "Information Technology", "25", "3550", "4041.60"),
-    ("ICICIBANK", "Financial Services", "60", "1140", "1403.33"),
-    ("BHARTIARTL", "Telecommunication", "40", "1420", "1684.00"),
-    ("WIPRO", "Information Technology", "100", "440", "505.20"),
-    ("ITC", "Consumer Staples", "200", "410", "450.00"),
-    ("SUNPHARMA", "Healthcare", "20", "1600", "1812.00"),
+from .schemas import (
+    AssetAllocation,
+    HistoricalCandle,
+    Holding,
+    PerformancePoint,
+    PortfolioSummary,
+    Position,
+    Profile,
+    Quote,
+    SectorExposure,
 )
 
 
-class SimulatedPortfolioProvider(PortfolioProvider):
+_DEMO_ROWS = (
+    {
+        "symbol": "HDFCBANK",
+        "name": "HDFC Bank",
+        "sector": "Financial Services",
+        "asset_class": "Indian equity",
+        "quantity": "100",
+        "average_price": "1420",
+        "target_current_price": "1532",
+        "target_day_pnl": "-8745",
+    },
+    {
+        "symbol": "RELIANCE",
+        "name": "Reliance Industries",
+        "sector": "Energy",
+        "asset_class": "Indian equity",
+        "quantity": "70",
+        "average_price": "1330",
+        "target_current_price": "1450",
+        "target_day_pnl": "3240",
+    },
+    {
+        "symbol": "INFY",
+        "name": "Infosys",
+        "sector": "Information Technology",
+        "asset_class": "Indian equity",
+        "quantity": "45",
+        "average_price": "1650",
+        "target_current_price": "1580",
+        "target_day_pnl": "-300",
+    },
+    {
+        "symbol": "TCS",
+        "name": "TCS",
+        "sector": "Information Technology",
+        "asset_class": "Indian equity",
+        "quantity": "15",
+        "average_price": "3600",
+        "target_current_price": "3800",
+        "target_day_pnl": "220",
+    },
+    {
+        "symbol": "BHARTIARTL",
+        "name": "Bharti Airtel",
+        "sector": "Telecom",
+        "asset_class": "Indian equity",
+        "quantity": "30",
+        "average_price": "1550",
+        "target_current_price": "1800",
+        "target_day_pnl": "800",
+    },
+    {
+        "symbol": "ITC",
+        "name": "ITC",
+        "sector": "Consumer Staples",
+        "asset_class": "Indian equity",
+        "quantity": "100",
+        "average_price": "450",
+        "target_current_price": "420",
+        "target_day_pnl": "-180",
+    },
+    {
+        "symbol": "SUNPHARMA",
+        "name": "Sun Pharma",
+        "sector": "Healthcare",
+        "asset_class": "Indian equity",
+        "quantity": "20",
+        "average_price": "1500",
+        "target_current_price": "1750",
+        "target_day_pnl": "100",
+    },
+    {
+        "symbol": "ICICIBANK",
+        "name": "ICICI Bank",
+        "sector": "Financial Services",
+        "asset_class": "Indian equity",
+        "quantity": "20",
+        "average_price": "1110",
+        "target_current_price": "1250",
+        "target_day_pnl": "-200",
+    },
+    {
+        "symbol": "PPFAS",
+        "name": "Parag Parikh Flexi Cap Fund",
+        "sector": "Diversified equity",
+        "asset_class": "Mutual funds",
+        "quantity": "1",
+        "average_price": "76000",
+        "target_current_price": "85000",
+        "target_day_pnl": "0",
+    },
+    {
+        "symbol": "UTINIFTY",
+        "name": "UTI Nifty 50 Index Fund",
+        "sector": "Diversified equity",
+        "asset_class": "Mutual funds",
+        "quantity": "1",
+        "average_price": "63000",
+        "target_current_price": "70000",
+        "target_day_pnl": "0",
+    },
+    {
+        "symbol": "MOMIDCAP",
+        "name": "Motilal Oswal Midcap Fund",
+        "sector": "Diversified equity",
+        "asset_class": "Mutual funds",
+        "quantity": "1",
+        "average_price": "45000",
+        "target_current_price": "50000",
+        "target_day_pnl": "0",
+    },
+    {
+        "symbol": "HDFCSTDEBT",
+        "name": "HDFC Short Term Debt Fund",
+        "sector": "Debt",
+        "asset_class": "Debt",
+        "quantity": "1",
+        "average_price": "38500",
+        "target_current_price": "40000",
+        "target_day_pnl": "0",
+    },
+    {
+        "symbol": "GOLDETF",
+        "name": "Gold ETF",
+        "sector": "Gold",
+        "asset_class": "Gold",
+        "quantity": "1",
+        "average_price": "29500",
+        "target_current_price": "33200",
+        "target_day_pnl": "0",
+    },
+    {
+        "symbol": "CASH",
+        "name": "Cash balance",
+        "sector": "Cash",
+        "asset_class": "Cash",
+        "quantity": "1",
+        "average_price": "24999.80",
+        "target_current_price": "24999.80",
+        "target_day_pnl": "0",
+    },
+)
+
+# Fund composition is fixture input. Portfolio-level sector exposure is always
+# calculated from each holding's current market value and these fund weights.
+_FUND_SECTOR_LOOKTHROUGH: dict[str, dict[str, Decimal]] = {
+    "PPFAS": {
+        "Financial Services": Decimal("24"),
+        "Information Technology": Decimal("17"),
+        "Consumer Discretionary": Decimal("18"),
+        "Communication Services": Decimal("12"),
+        "Industrials": Decimal("10"),
+        "Healthcare": Decimal("8"),
+        "Other": Decimal("11"),
+    },
+    "UTINIFTY": {
+        "Financial Services": Decimal("34"),
+        "Information Technology": Decimal("14"),
+        "Energy": Decimal("13"),
+        "Consumer Staples": Decimal("9"),
+        "Industrials": Decimal("9"),
+        "Healthcare": Decimal("5"),
+        "Other": Decimal("16"),
+    },
+    "MOMIDCAP": {
+        "Financial Services": Decimal("18"),
+        "Information Technology": Decimal("12"),
+        "Industrials": Decimal("23"),
+        "Consumer Discretionary": Decimal("18"),
+        "Healthcare": Decimal("10"),
+        "Other": Decimal("19"),
+    },
+}
+
+_PERFORMANCE = (
+    ("1D", "-0.60", "-0.30"),
+    ("1W", "1.70", "0.80"),
+    ("1M", "3.80", "2.50"),
+    ("3M", "6.50", "4.80"),
+    ("1Y", "9.40", "8.20"),
+)
+
+
+def _previous_close(row: dict[str, str]) -> Decimal:
+    quantity = Decimal(row["quantity"])
+    target_value = quantity * Decimal(row["target_current_price"])
+    target_day_pnl = Decimal(row["target_day_pnl"])
+    return ((target_value - target_day_pnl) / quantity).quantize(Decimal("0.0001"))
+
+
+class DemoPortfolioProvider(PortfolioProvider):
     source = "simulated"
     is_live = False
 
@@ -35,24 +223,22 @@ class SimulatedPortfolioProvider(PortfolioProvider):
 
     def _holdings(self) -> list[Holding]:
         snapshot = simulation_service.snapshot()
-        reference_values = {
-            symbol: Decimal(quantity) * Decimal(reference)
-            for symbol, _, quantity, _, reference in _ROWS
-        }
-        reference_total = sum(reference_values.values(), Decimal("0"))
         raw = []
-        for symbol, sector, quantity, average, reference in _ROWS:
-            qty = Decimal(quantity)
-            previous_close = Decimal(reference)
-            return_pct = Decimal(str(snapshot.holding_returns_pct.get(symbol, 0.0)))
+        for row in _DEMO_ROWS:
+            qty = Decimal(row["quantity"])
+            previous_close = _previous_close(row)
+            return_pct = Decimal(str(snapshot.holding_returns_pct.get(row["symbol"], 0.0)))
             current_price = (previous_close * (Decimal("1") + return_pct / 100)).quantize(
                 Decimal("0.01")
             )
-            average_price = Decimal(average)
+            average_price = Decimal(row["average_price"])
             raw.append(
                 {
-                    "symbol": symbol,
-                    "sector": sector,
+                    "symbol": row["symbol"],
+                    "name": row["name"],
+                    "asset_class": row["asset_class"],
+                    "sector": row["sector"],
+                    "sector_lookthrough": _FUND_SECTOR_LOOKTHROUGH.get(row["symbol"], {}),
                     "quantity": qty,
                     "average_price": average_price,
                     "current_price": current_price,
@@ -61,17 +247,95 @@ class SimulatedPortfolioProvider(PortfolioProvider):
                     "invested_value": qty * average_price,
                 }
             )
+        current_total = sum((row["market_value"] for row in raw), Decimal("0"))
         return [
             Holding(
                 **row,
                 unrealized_pnl=row["market_value"] - row["invested_value"],
                 day_pnl=row["quantity"] * (row["current_price"] - row["previous_close"]),
                 portfolio_weight=(
-                    reference_values[row["symbol"]] / reference_total * 100
+                    row["market_value"] / current_total * 100
                 ).quantize(Decimal("0.01")),
             )
             for row in raw
         ]
+
+    async def get_summary(self) -> PortfolioSummary:
+        holdings = self._holdings()
+        portfolio_value = sum((holding.market_value for holding in holdings), Decimal("0"))
+        invested_value = sum((holding.invested_value for holding in holdings), Decimal("0"))
+        sector_values: dict[str, Decimal] = defaultdict(Decimal)
+        allocation_values: dict[str, Decimal] = defaultdict(Decimal)
+        for holding in holdings:
+            allocation_values[holding.asset_class or "Unclassified"] += holding.market_value
+            if holding.sector_lookthrough:
+                for sector, weight in holding.sector_lookthrough.items():
+                    sector_values[sector] += holding.market_value * weight / 100
+            else:
+                sector_values[holding.sector or "Unclassified"] += holding.market_value
+        sectors = sorted(
+            (
+                SectorExposure(
+                    sector=sector,
+                    market_value=value.quantize(Decimal("0.01")),
+                    portfolio_weight=(value / portfolio_value * 100).quantize(Decimal("0.01")),
+                )
+                for sector, value in sector_values.items()
+            ),
+            key=lambda item: item.market_value,
+            reverse=True,
+        )
+        allocation = sorted(
+            (
+                AssetAllocation(
+                    label=label,
+                    market_value=value,
+                    portfolio_weight=(value / portfolio_value * 100).quantize(Decimal("0.01")),
+                )
+                for label, value in allocation_values.items()
+            ),
+            key=lambda item: item.market_value,
+            reverse=True,
+        )
+        performance = [
+            PerformancePoint(
+                period=period,
+                portfolio_return_pct=Decimal(portfolio_return),
+                benchmark_return_pct=Decimal(benchmark_return),
+                benchmark_label="Nifty 50",
+            )
+            for period, portfolio_return, benchmark_return in _PERFORMANCE
+        ]
+        return PortfolioSummary(
+            source="simulated",
+            provider="simulated",
+            scenario_id=self.scenario_id,
+            is_live=self.is_live,
+            as_of=self.as_of,
+            portfolio_value=portfolio_value,
+            invested_value=invested_value,
+            unrealized_pnl=portfolio_value - invested_value,
+            day_pnl=sum((holding.day_pnl or Decimal("0") for holding in holdings), Decimal("0")),
+            overall_return_pct=(
+                (portfolio_value - invested_value) / invested_value * 100
+            ).quantize(Decimal("0.01")) if invested_value else Decimal("0"),
+            equity_exposure_pct=sum(
+                item.portfolio_weight
+                for item in allocation
+                if item.label in {"Indian equity", "Mutual funds"}
+            ),
+            defensive_exposure_pct=sum(
+                item.portfolio_weight
+                for item in allocation
+                if item.label in {"Debt", "Gold", "Cash"}
+            ),
+            risk_profile="Moderately aggressive",
+            holdings=sorted(holdings, key=lambda item: item.market_value, reverse=True),
+            sector_exposure=sectors,
+            asset_allocation=allocation,
+            performance=performance,
+            data_source_label="Demo portfolio",
+        )
 
     async def get_profile(self) -> Profile:
         return Profile(
@@ -79,9 +343,9 @@ class SimulatedPortfolioProvider(PortfolioProvider):
             provider="simulated",
             scenario_id=self.scenario_id,
             user_id="SIM001",
-            user_name="Simulated Investor",
-            email="simulation@example.invalid",
-            broker="Simulated Portfolio",
+            user_name="Demo Investor",
+            email="demo@example.invalid",
+            broker="Demo portfolio",
         )
 
     async def get_holdings(self) -> list[Holding]:
@@ -148,3 +412,11 @@ class SimulatedPortfolioProvider(PortfolioProvider):
                 index += 1
             cursor = date.fromordinal(cursor.toordinal() + 1)
         return candles
+
+
+# Compatibility for existing imports and environment names. New application
+# code should use DemoPortfolioProvider; simulation remains a developer fixture.
+SimulatedPortfolioProvider = DemoPortfolioProvider
+
+
+__all__ = ["DemoPortfolioProvider", "SimulatedPortfolioProvider"]

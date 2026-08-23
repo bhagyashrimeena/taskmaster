@@ -1,6 +1,6 @@
 """Phase 7 packet review, confirmation, and durable reply tests."""
 
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -10,6 +10,7 @@ from wealth_copilot.advisor.schemas import (
     AdvisorStatus,
     CreateAdvisorPacketRequest,
 )
+from wealth_copilot.config import application_today
 from wealth_copilot.advisor.service import AdvisorService
 from wealth_copilot.day.store import FinancialDayStore
 from wealth_copilot.interaction.schemas import SourceReference, SurfaceContext
@@ -22,10 +23,12 @@ def service(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> AdvisorService:
             target_type="event",
             target_id="hdfc-bank-sudden-fall",
             title="HDFC Bank unusual move",
+            portfolio_as_of=datetime.fromisoformat("2026-08-18T12:17:00+05:30"),
+            source_checkpoint="12:17",
             facts=[
                 "HDFC Bank moved -5.4% while its sector moved -0.8%.",
-                "Your direct exposure is 18.01% and sector exposure is 28.00%.",
-                "Deterministic relevance score: 94.21/100; attention decision: ALERT.",
+                "At the 12:17 portfolio snapshot, your direct exposure is 17.21% and sector exposure is 27.26%.",
+                "Deterministic relevance score: 93.11/100; attention decision: ALERT.",
             ],
             interpretation=["The move is materially different from the broader sector."],
             unknowns=["The retained event data does not establish one confirmed cause."],
@@ -63,10 +66,10 @@ async def test_packet_uses_retained_context_and_starts_as_draft(service: Advisor
     )
 
     assert case.packet.status == AdvisorStatus.DRAFT
-    assert "18.01%" in case.packet.exposure
+    assert "17.21%" in case.packet.exposure
     assert case.packet.sources[0].name == "NSE"
     assert "What would you monitor next?" in case.packet.email.body
-    assert service.store.get(date.today()).advisor_requests[0].request_id == case.packet.request_id
+    assert service.store.get(application_today()).advisor_requests[0].request_id == case.packet.request_id
 
 
 @pytest.mark.asyncio
@@ -103,10 +106,9 @@ async def test_demo_response_is_linked_and_persisted(service: AdvisorService) ->
     service.send(draft.packet.request_id, confirmed=True)
 
     replied = service.get(draft.packet.request_id)
-    persisted = service.store.get(date.today())
+    persisted = service.store.get(application_today())
     assert replied.packet.status == AdvisorStatus.REPLIED
     assert replied.response is not None
     assert replied.response.request_id == draft.packet.request_id
     assert persisted.advisor_responses[0].response_id == replied.response.response_id
     assert "Advisor perspective" == replied.response.perspective_label
-

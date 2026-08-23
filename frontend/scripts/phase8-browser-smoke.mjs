@@ -26,7 +26,9 @@ try {
 
   await page.goto("http://127.0.0.1:3001", { waitUntil: "networkidle", timeout: 30000 });
   await page.getByTestId("wealth-story-card").waitFor();
-  await page.getByText(`${story.duration_seconds} sec visual recap`, { exact: true }).waitFor();
+  await page.getByRole("heading", {
+    name: new RegExp(`Your financial day.*${story.duration_seconds} sec`, "i"),
+  }).waitFor();
   await page.screenshot({ path: "../artifacts/phase8-dashboard-story-card.png", fullPage: true });
 
   await page.getByTestId("watch-wealth-story").click();

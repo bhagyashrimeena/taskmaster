@@ -4,7 +4,7 @@ from datetime import date, datetime, timezone
 import re
 from uuid import uuid4
 
-from ..config import get_settings
+from ..config import application_today, get_settings
 from ..day.schemas import FinancialDayState
 from ..day.active import ArtifactProvenance
 from ..day.store import FinancialDayStore, financial_day_store
@@ -131,7 +131,7 @@ class AdvisorService:
             ),
         )
         packet.email.body = self._email_body(packet, profile)
-        self.store.update(lambda state: state.advisor_requests.append(packet), date.today())
+        self.store.update(lambda state: state.advisor_requests.append(packet), application_today())
         return AdvisorCase(packet=packet)
 
     def _find(self, request_id: str, trading_date: date | None = None) -> tuple[FinancialDayState, AdvisorPacket]:

@@ -5,6 +5,7 @@ from datetime import date
 from threading import RLock
 
 from .schemas import DailyInteractionView
+from ..config import application_today
 
 
 @dataclass
@@ -62,14 +63,14 @@ class DailyInteractionStore:
 
     def save_story(self, story_id: str, trading_date: date | None = None) -> DailyInteractionView:
         with self._lock:
-            day = self._day(trading_date or date.today())
+            day = self._day(trading_date or application_today())
             if story_id not in day.saved_story_ids:
                 day.saved_story_ids.append(story_id)
             return day.model_copy(deep=True)
 
     def save_event(self, event_id: str, trading_date: date | None = None) -> DailyInteractionView:
         with self._lock:
-            day = self._day(trading_date or date.today())
+            day = self._day(trading_date or application_today())
             if event_id not in day.saved_event_ids:
                 day.saved_event_ids.append(event_id)
             return day.model_copy(deep=True)
@@ -78,13 +79,13 @@ class DailyInteractionStore:
         self, target_type: str, target_id: str, value: str, trading_date: date | None = None
     ) -> DailyInteractionView:
         with self._lock:
-            day = self._day(trading_date or date.today())
+            day = self._day(trading_date or application_today())
             day.feedback[f"{target_type}:{target_id}"] = value
             return day.model_copy(deep=True)
 
     def get(self, trading_date: date | None = None) -> DailyInteractionView:
         with self._lock:
-            return self._day(trading_date or date.today()).model_copy(deep=True)
+            return self._day(trading_date or application_today()).model_copy(deep=True)
 
     def clear(self) -> None:
         with self._lock:
@@ -93,4 +94,3 @@ class DailyInteractionStore:
 
 conversation_store = ConversationStore()
 daily_interaction_store = DailyInteractionStore()
-

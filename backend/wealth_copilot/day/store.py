@@ -5,8 +5,10 @@ from datetime import date, datetime, timezone
 import json
 from pathlib import Path
 from threading import RLock
+from time import sleep
+from uuid import uuid4
 
-from ..config import get_settings
+from ..config import application_today, get_settings
 from .schemas import FinancialDayState, StepStatus, default_timeline
 
 
@@ -20,7 +22,7 @@ class FinancialDayStore:
         return self.root / f"{trading_date.isoformat()}.json"
 
     def get(self, trading_date: date | None = None) -> FinancialDayState:
-        selected = trading_date or date.today()
+        selected = trading_date or application_today()
         path = self._path(selected)
         with self._lock:
             if not path.exists():
@@ -51,11 +53,19 @@ class FinancialDayStore:
     def save(self, state: FinancialDayState) -> FinancialDayState:
         state.updated_at = datetime.now(timezone.utc)
         path = self._path(state.trading_date)
-        temporary = path.with_suffix(".json.tmp")
+        temporary = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
         payload = state.model_dump_json(indent=2)
         with self._lock:
             temporary.write_text(payload, encoding="utf-8")
-            temporary.replace(path)
+            for attempt in range(20):
+                try:
+                    temporary.replace(path)
+                    break
+                except PermissionError:
+                    if attempt == 19:
+                        raise
+                    # Cloud-synced Windows workspaces can briefly lock the old file.
+                    sleep(0.01 * (attempt + 1))
         return state.model_copy(deep=True)
 
     def update(
@@ -63,14 +73,14 @@ class FinancialDayStore:
         mutator: Callable[[FinancialDayState], None],
         trading_date: date | None = None,
     ) -> FinancialDayState:
-        selected = trading_date or date.today()
+        selected = trading_date or application_today()
         with self._lock:
             state = self.get(selected)
             mutator(state)
             return self.save(state)
 
     def clear(self, trading_date: date | None = None) -> None:
-        selected = trading_date or date.today()
+        selected = trading_date or application_today()
         path = self._path(selected)
         with self._lock:
             if path.exists():

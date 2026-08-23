@@ -1,0 +1,39 @@
+flowchart LR
+    observe(["Observe event"])
+    normalize["Normalize and deduplicate"]
+    match["Match portfolio"]
+    exposure["Direct and sector exposure"]
+    materiality["Assess materiality"]
+    investigate["Grounded search investigation"]
+    verify["Verify trusted sources"]
+    score["Deterministic relevance score"]
+    decision{"Decision engine"}
+    ignore["IGNORE: no interruption"]
+    monitor["MONITOR: watch queue"]
+    investigateOutcome["INVESTIGATE: research brief"]
+    alert["ALERT: contextual alert"]
+    financialDay[("Financial Day State")]
+    explain["Explain why it matters"]
+    userAction{"User action"}
+    review["Review"]
+    deeper["Research deeper"]
+    advisor["Advisor handoff"]
+    dismiss["Dismiss"]
+
+    observe --> normalize --> match --> exposure --> materiality
+    materiality --> investigate --> verify --> score --> decision
+    decision --> ignore & monitor & investigateOutcome & alert
+    ignore & monitor & investigateOutcome & alert --> financialDay
+    monitor -.->|"When reviewed"| explain
+    investigateOutcome --> explain
+    alert --> explain
+    explain --> userAction
+    userAction --> review & deeper & advisor & dismiss
+
+    classDef agent fill:#C2E5FF,stroke:#3DADFF;
+    classDef deterministic fill:#FFE0C2,stroke:#FF9E42;
+    classDef human fill:#CDF4D3,stroke:#66D575;
+
+    class investigate,verify,explain agent;
+    class normalize,match,exposure,materiality,score,decision deterministic;
+    class userAction,review,deeper,advisor,dismiss human;

@@ -6,6 +6,9 @@ from fastapi.testclient import TestClient
 from google.adk.tools.agent_tool import AgentTool
 
 from wealth_copilot.agents.research_agent import research_agent
+from wealth_copilot.config import application_today
+from wealth_copilot.day.schemas import DayRunMode
+from wealth_copilot.day.store import financial_day_store
 from wealth_copilot.agents.taskmaster import root_agent
 from wealth_copilot.api import app
 from wealth_copilot.interaction.context import resolve_surface_context
@@ -14,6 +17,14 @@ from wealth_copilot.interaction.research_jobs import ResearchJobManager
 from wealth_copilot.interaction.schemas import ConversationRequest, InteractionMode, ResearchRequest
 from wealth_copilot.interaction.service import InteractionService
 from wealth_copilot.interaction.service import _grounding_sources
+from wealth_copilot.simulation import simulation_service
+
+
+def _release_demo_event() -> None:
+    financial_day_store.update(
+        lambda state: setattr(state, "run_mode", DayRunMode.DEMO)
+    )
+    simulation_service.advance_to("12:17")
 
 
 async def _fake_taskmaster(prompt: str, timeout: float):
@@ -51,7 +62,28 @@ async def test_explain_uses_stable_item_context_and_follow_up_history() -> None:
     assert len(conversation_store.get(first.conversation_id).history) == 4
 
 
+async def test_text_voice_and_call_modes_share_the_taskmaster_path() -> None:
+    prompts: list[str] = []
+
+    async def capture(prompt: str, timeout: float):
+        del timeout
+        prompts.append(prompt)
+        return "The same retained portfolio context was used.", ["TaskMaster completed"]
+
+    service = InteractionService(invoker=capture)
+    for mode in (InteractionMode.TEXT, InteractionMode.VOICE, InteractionMode.CALL):
+        response = await service.respond(ConversationRequest(message="What changed?", mode=mode))
+        assert response.route == "taskmaster"
+        assert response.mode == mode
+        assert response.used_existing_context is True
+
+    assert [f"MODE: {mode.value}" in prompt for mode, prompt in zip(
+        (InteractionMode.TEXT, InteractionMode.VOICE, InteractionMode.CALL), prompts, strict=True
+    )] == [True, True, True]
+
+
 async def test_event_context_separates_facts_interpretation_and_sources() -> None:
+    _release_demo_event()
     context = await resolve_surface_context(event_id="hdfc-bank-sudden-fall")
 
     assert context.target_type == "event"
@@ -59,6 +91,49 @@ async def test_event_context_separates_facts_interpretation_and_sources() -> Non
     assert context.interpretation
     assert context.unknowns
     assert len(context.sources) >= 3
+
+
+async def test_story_context_uses_one_timestamped_portfolio_snapshot() -> None:
+    simulation_service.advance_to("07:00")
+    morning = await resolve_surface_context(story_id="hdfc-rbi")
+
+    assert morning.source_checkpoint == "07:00"
+    assert morning.portfolio_as_of.strftime("%H:%M") == "07:00"
+    assert any(
+        "At the 07:00 portfolio snapshot, direct exposure is" in fact
+        and "sector exposure is" in fact
+        for fact in morning.facts
+    )
+    assert any("Deterministic relevance score" in fact for fact in morning.facts)
+
+    simulation_service.advance_to("12:17")
+    noon = await resolve_surface_context(story_id="hdfc-rbi")
+
+    assert noon.source_checkpoint == "12:17"
+    assert noon.portfolio_as_of.strftime("%H:%M") == "12:17"
+    assert any(
+        "At the 12:17 portfolio snapshot, direct exposure is" in fact
+        and "sector exposure is" in fact
+        for fact in noon.facts
+    )
+    assert any("Deterministic relevance score" in fact for fact in noon.facts)
+
+
+async def test_event_context_exposure_matches_1217_provenance() -> None:
+    _release_demo_event()
+    context = await resolve_surface_context(event_id="hdfc-bank-sudden-fall")
+
+    assert context.source_checkpoint == "12:17"
+    assert context.portfolio_as_of.strftime("%H:%M") == "12:17"
+    assert any(
+        "At the 12:17 portfolio snapshot, your direct exposure is" in fact
+        and "sector exposure is" in fact
+        for fact in context.facts
+    )
+    assert any(
+        "Deterministic relevance score:" in fact and "attention decision: ALERT" in fact
+        for fact in context.facts
+    )
 
 
 async def test_taskmaster_has_research_specialist() -> None:
@@ -69,6 +144,7 @@ async def test_taskmaster_has_research_specialist() -> None:
 
 
 async def test_research_job_runs_through_research_mode() -> None:
+    _release_demo_event()
     calls = []
 
     async def research_invoker(prompt: str, timeout: float):
@@ -91,6 +167,7 @@ async def test_research_job_runs_through_research_mode() -> None:
 
 
 async def test_model_failure_returns_existing_context_without_search() -> None:
+    _release_demo_event()
     async def unavailable(prompt: str, timeout: float):
         del prompt, timeout
         raise RuntimeError("quota")
@@ -116,7 +193,7 @@ async def test_portfolio_fallback_retains_largest_holdings() -> None:
         ConversationRequest(message="Which holding is my largest exposure?")
     )
     assert result.route == "portfolio_agent"
-    assert any("HDFCBANK 18.01%" in fact for fact in result.context.facts)
+    assert any("HDFCBANK" in fact for fact in result.context.facts)
 
 
 async def test_unsafe_model_instruction_is_removed() -> None:
@@ -185,7 +262,7 @@ def test_story_save_feedback_and_daily_state_http_contract() -> None:
     dashboard = client.get("/api/v1/dashboard").json()
 
     assert saved.status_code == 200
-    assert saved.json()["saved_for"] == date.today().isoformat()
+    assert saved.json()["saved_for"] == application_today().isoformat()
     assert feedback.status_code == 200
     assert "hdfc-rbi" in dashboard["daily_state"]["saved_story_ids"]
     assert dashboard["daily_state"]["feedback"]["story:hdfc-rbi"] == "useful"

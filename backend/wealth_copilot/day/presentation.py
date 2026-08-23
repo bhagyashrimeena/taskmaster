@@ -1,4 +1,4 @@
-"""Accelerated, presentation-only market clock for proactive day playback."""
+"""Accelerated financial-day clock backed by the canonical day orchestrator."""
 
 import asyncio
 from datetime import date
@@ -7,6 +7,7 @@ from time import monotonic
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from ..config import application_today
 from .orchestrator import DayOrchestrator, day_orchestrator
 from .schemas import StepStatus
 
@@ -26,44 +27,50 @@ def _as_clock(minute: int) -> str:
     return f"{bounded // 60:02d}:{bounded % 60:02d}"
 
 
-class PresentationClockModel(BaseModel):
+class FinancialDayClockModel(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
 
-class PresentationClockStatus(StrEnum):
+class FinancialDayClockStatus(StrEnum):
     PAUSED = "paused"
     RUNNING = "running"
     COMPLETE = "complete"
     FAILED = "failed"
 
 
-class PresentationClockState(PresentationClockModel):
+class FinancialDayClockState(FinancialDayClockModel):
     trading_date: date
     current_time: str
     speed: int
-    status: PresentationClockStatus
+    status: FinancialDayClockStatus
     active_checkpoint: str | None = None
     next_checkpoint: str | None = None
     completed_checkpoint_ids: list[str] = Field(default_factory=list)
     message: str
 
 
-class PresentationAdvanceRequest(PresentationClockModel):
+class FinancialDayAdvanceRequest(FinancialDayClockModel):
     minutes: int = Field(default=60, ge=1, le=840)
 
 
-class PresentationClockService:
-    """Owns presentation time while delegating every operation to DayOrchestrator."""
+class FinancialDayClockService:
+    """Runs every scheduled checkpoint through the existing DayOrchestrator."""
 
-    checkpoints = (
-        ("morning", "07:00", "run_morning_pulse"),
-        ("health", "08:00", "run_portfolio_health"),
-        ("event", "12:17", "handle_market_event"),
-        ("close", "15:30", "run_market_close"),
-        ("evening", "20:00", "run_evening_wrap"),
-        ("tomorrow", "21:00", "prepare_tomorrow"),
-        ("story", "21:01", "generate_daily_story"),
-    )
+    operations = {
+        "morning": "run_morning_pulse",
+        "health": "run_portfolio_health",
+        "open": "run_market_open_monitor",
+        "watch": "run_adaptive_market_watch",
+        "sector": "run_sector_deep_dive",
+        "event": "handle_market_event",
+        "learning": "run_contextual_learning",
+        "close": "run_market_close",
+        "intelligence": "run_portfolio_intelligence",
+        "actions": "run_action_queue",
+        "evening": "run_evening_wrap",
+        "tomorrow": "prepare_tomorrow",
+        "story": "generate_daily_story",
+    }
 
     def __init__(
         self,
@@ -76,7 +83,7 @@ class PresentationClockService:
         self.speed = speed
         self.tick_seconds = tick_seconds
         self._minute = float(DAY_START_MINUTE)
-        self._status = PresentationClockStatus.PAUSED
+        self._status = FinancialDayClockStatus.PAUSED
         self._active_checkpoint: str | None = None
         self._message = "Ready at the first financial-day checkpoint."
         self._task: asyncio.Task | None = None
@@ -85,20 +92,34 @@ class PresentationClockService:
         self._initialized_date: date | None = None
 
     def _day(self, selected: date | None = None):
-        return self.orchestrator.store.get(selected or date.today())
+        return self.orchestrator.store.get(selected or application_today())
+
+    def _schedule(self, selected: date) -> list[tuple[str, str, str]]:
+        day = self._day(selected)
+        scheduled = [
+            (step.step_id, step.scheduled_time, self.operations[step.step_id])
+            for step in day.timeline
+            if step.step_id in self.operations
+        ]
+        return sorted(scheduled, key=lambda item: (_as_minute(item[1]), item[0]))
 
     def _restore_persisted(self, selected: date) -> None:
-        if self._initialized_date == selected:
-            return
         day = self._day(selected)
+        if self._initialized_date == selected and day.run_mode == "presentation":
+            return
         if day.run_mode != "presentation":
+            self._initialized_date = None
+            self._minute = float(DAY_START_MINUTE)
+            self._status = FinancialDayClockStatus.PAUSED
+            self._active_checkpoint = None
+            self._message = "Ready at the first financial-day checkpoint."
             return
         self._initialized_date = selected
         self._minute = float(day.presentation_minute or DAY_START_MINUTE)
         try:
-            self._status = PresentationClockStatus(day.presentation_status or "paused")
+            self._status = FinancialDayClockStatus(day.presentation_status or "paused")
         except ValueError:
-            self._status = PresentationClockStatus.PAUSED
+            self._status = FinancialDayClockStatus.PAUSED
         self._active_checkpoint = day.presentation_active_checkpoint
         self._message = day.presentation_message or f"Ready at {_as_clock(round(self._minute))}."
 
@@ -109,6 +130,7 @@ class PresentationClockService:
         message = self._message
 
         def mutate(state) -> None:
+            # Persisted field names stay unchanged for backwards compatibility.
             state.presentation_minute = minute
             state.presentation_status = status
             state.presentation_active_checkpoint = active_checkpoint
@@ -116,8 +138,8 @@ class PresentationClockService:
 
         self.orchestrator.store.update(mutate, selected)
 
-    def state(self, trading_date: date | None = None) -> PresentationClockState:
-        selected = trading_date or date.today()
+    def state(self, trading_date: date | None = None) -> FinancialDayClockState:
+        selected = trading_date or application_today()
         self._restore_persisted(selected)
         day = self._day(selected)
         completed = [
@@ -126,16 +148,19 @@ class PresentationClockService:
         next_checkpoint = next(
             (
                 scheduled
-                for step_id, scheduled, _ in self.checkpoints
+                for step_id, scheduled, _ in self._schedule(selected)
                 if step_id not in completed
             ),
             None,
         )
-        return PresentationClockState(
+        status = self._status
+        if len(completed) == len(day.timeline) and day.timeline:
+            status = FinancialDayClockStatus.COMPLETE
+        return FinancialDayClockState(
             trading_date=selected,
             current_time=_as_clock(round(self._minute)),
             speed=self.speed,
-            status=self._status,
+            status=status,
             active_checkpoint=self._active_checkpoint,
             next_checkpoint=next_checkpoint,
             completed_checkpoint_ids=completed,
@@ -149,13 +174,13 @@ class PresentationClockService:
         await self.orchestrator.initialize_presentation_day(selected)
         self._initialized_date = selected
         self._minute = float(DAY_START_MINUTE)
-        self._status = PresentationClockStatus.PAUSED
+        self._status = FinancialDayClockStatus.PAUSED
         self._active_checkpoint = None
         self._message = "Ready at the first financial-day checkpoint."
         self._persist(selected)
 
-    async def restart(self, trading_date: date | None = None) -> PresentationClockState:
-        selected = trading_date or date.today()
+    async def restart(self, trading_date: date | None = None) -> FinancialDayClockState:
+        selected = trading_date or application_today()
         task = self._task
         self._play_requested = False
         if task and not task.done() and task is not asyncio.current_task():
@@ -168,49 +193,56 @@ class PresentationClockService:
             await self.orchestrator.initialize_presentation_day(selected)
             self._initialized_date = selected
             self._minute = float(DAY_START_MINUTE)
-            self._status = PresentationClockStatus.PAUSED
+            self._status = FinancialDayClockStatus.PAUSED
             self._active_checkpoint = None
             self._message = "Financial day restarted at 07:00."
             self._task = None
             self._persist(selected)
             return self.state(selected)
 
-    async def play(self, trading_date: date | None = None) -> PresentationClockState:
-        selected = trading_date or date.today()
+    async def restart_and_play(
+        self, trading_date: date | None = None
+    ) -> FinancialDayClockState:
+        selected = trading_date or application_today()
+        await self.restart(selected)
+        return await self.play(selected)
+
+    async def play(self, trading_date: date | None = None) -> FinancialDayClockState:
+        selected = trading_date or application_today()
         async with self._lock:
             await self._ensure_initialized(selected)
-            if self._status == PresentationClockStatus.COMPLETE:
+            if self._status == FinancialDayClockStatus.COMPLETE:
                 return self.state(selected)
             self._play_requested = True
-            self._status = PresentationClockStatus.RUNNING
+            self._status = FinancialDayClockStatus.RUNNING
             self._message = f"Financial day is moving at {self.speed}x."
             self._persist(selected)
             if not self._task or self._task.done():
                 self._task = asyncio.create_task(self._play_loop(selected))
             return self.state(selected)
 
-    async def pause(self, trading_date: date | None = None) -> PresentationClockState:
+    async def pause(self, trading_date: date | None = None) -> FinancialDayClockState:
         self._play_requested = False
         if self._status not in {
-            PresentationClockStatus.COMPLETE,
-            PresentationClockStatus.FAILED,
+            FinancialDayClockStatus.COMPLETE,
+            FinancialDayClockStatus.FAILED,
         }:
-            self._status = PresentationClockStatus.PAUSED
+            self._status = FinancialDayClockStatus.PAUSED
             self._message = f"Paused at {_as_clock(round(self._minute))}."
-            self._persist(trading_date or date.today())
+            self._persist(trading_date or application_today())
         return self.state(trading_date)
 
     async def advance(
         self, minutes: int, trading_date: date | None = None
-    ) -> PresentationClockState:
-        selected = trading_date or date.today()
+    ) -> FinancialDayClockState:
+        selected = trading_date or application_today()
         async with self._lock:
             await self._ensure_initialized(selected)
             if self._task and not self._task.done():
                 return self.state(selected)
             target = min(DAY_END_MINUTE, round(self._minute) + minutes)
             self._play_requested = False
-            self._status = PresentationClockStatus.RUNNING
+            self._status = FinancialDayClockStatus.RUNNING
             self._message = f"Advancing to {_as_clock(target)}."
             self._persist(selected)
             self._task = asyncio.create_task(self._advance_to(selected, target))
@@ -218,8 +250,8 @@ class PresentationClockService:
 
     async def advance_to_next(
         self, trading_date: date | None = None
-    ) -> PresentationClockState:
-        selected = trading_date or date.today()
+    ) -> FinancialDayClockState:
+        selected = trading_date or application_today()
         state = self.state(selected)
         if state.next_checkpoint is None:
             return state
@@ -227,7 +259,7 @@ class PresentationClockService:
         return await self.advance(delta, selected)
 
     async def _run_due(self, selected: date, target_minute: int) -> None:
-        for step_id, scheduled, operation_name in self.checkpoints:
+        for step_id, scheduled, operation_name in self._schedule(selected):
             scheduled_minute = _as_minute(scheduled)
             if scheduled_minute > target_minute:
                 break
@@ -239,29 +271,36 @@ class PresentationClockService:
             self._active_checkpoint = step_id
             self._message = f"{step.label} is running automatically."
             self._persist(selected)
+            self.orchestrator._advance_developer_clock(selected, scheduled)
             operation = getattr(self.orchestrator, operation_name)
             await operation(trading_date=selected)
             self._active_checkpoint = None
             self._message = f"{step.label} completed."
             self._persist(selected)
 
+    def _complete(self, selected: date) -> None:
+        day = self._day(selected)
+        if all(step.status == StepStatus.COMPLETE for step in day.timeline):
+            self.orchestrator.complete_presentation_day(selected)
+            self._status = FinancialDayClockStatus.COMPLETE
+            self._message = "The financial day and visual recap are complete."
+
     async def _advance_to(self, selected: date, target_minute: int) -> None:
         try:
             await self._run_due(selected, target_minute)
             self._minute = float(target_minute)
             if target_minute >= DAY_END_MINUTE:
-                self.orchestrator.complete_presentation_day(selected)
-                self._status = PresentationClockStatus.COMPLETE
-                self._message = "The financial day and visual recap are complete."
+                self._complete(selected)
             else:
-                self._status = PresentationClockStatus.PAUSED
+                self._status = FinancialDayClockStatus.PAUSED
                 self._message = f"Paused at {_as_clock(target_minute)}."
             self._persist(selected)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            self._status = PresentationClockStatus.FAILED
+            self._status = FinancialDayClockStatus.FAILED
             self._message = f"Playback paused safely ({type(exc).__name__})."
+            self._persist(selected)
         finally:
             self._active_checkpoint = None
 
@@ -281,7 +320,7 @@ class PresentationClockService:
                 upcoming = next(
                     (
                         _as_minute(scheduled)
-                        for step_id, scheduled, _ in self.checkpoints
+                        for step_id, scheduled, _ in self._schedule(selected)
                         if _as_minute(scheduled) > self._minute
                         and next(
                             step
@@ -299,20 +338,26 @@ class PresentationClockService:
                 self._persist(selected)
 
             if self._minute >= DAY_END_MINUTE:
-                self.orchestrator.complete_presentation_day(selected)
-                self._status = PresentationClockStatus.COMPLETE
-                self._message = "The financial day and visual recap are complete."
-            elif self._status != PresentationClockStatus.FAILED:
-                self._status = PresentationClockStatus.PAUSED
+                self._complete(selected)
+            elif self._status != FinancialDayClockStatus.FAILED:
+                self._status = FinancialDayClockStatus.PAUSED
                 self._message = f"Paused at {_as_clock(round(self._minute))}."
             self._persist(selected)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            self._status = PresentationClockStatus.FAILED
+            self._status = FinancialDayClockStatus.FAILED
             self._message = f"Playback paused safely ({type(exc).__name__})."
+            self._persist(selected)
         finally:
             self._active_checkpoint = None
+
+    async def recover(self, trading_date: date | None = None) -> FinancialDayClockState:
+        selected = trading_date or application_today()
+        state = self.state(selected)
+        if state.status == FinancialDayClockStatus.RUNNING:
+            return await self.play(selected)
+        return state
 
     async def stop(self) -> None:
         self._play_requested = False
@@ -326,13 +371,25 @@ class PresentationClockService:
         self._task = None
 
 
-presentation_clock = PresentationClockService()
+financial_day_clock = FinancialDayClockService()
+
+# Compatibility names remain available for existing integrations.
+PresentationAdvanceRequest = FinancialDayAdvanceRequest
+PresentationClockService = FinancialDayClockService
+PresentationClockState = FinancialDayClockState
+PresentationClockStatus = FinancialDayClockStatus
+presentation_clock = financial_day_clock
 
 
 __all__ = [
+    "FinancialDayAdvanceRequest",
+    "FinancialDayClockService",
+    "FinancialDayClockState",
+    "FinancialDayClockStatus",
     "PresentationAdvanceRequest",
     "PresentationClockService",
     "PresentationClockState",
     "PresentationClockStatus",
+    "financial_day_clock",
     "presentation_clock",
 ]

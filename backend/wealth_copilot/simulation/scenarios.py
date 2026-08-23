@@ -9,7 +9,7 @@ from .schemas import SimulationScenario, SimulationSnapshot
 
 IST = ZoneInfo("Asia/Kolkata")
 TRADING_DATE = (2026, 8, 18)
-CHECKPOINTS = ("07:00", "09:15", "12:17", "15:30", "20:00", "21:00")
+CHECKPOINTS = ("07:00", "08:00", "12:17", "15:30", "20:00", "21:00")
 
 
 def _at(value: str) -> datetime:
@@ -26,7 +26,7 @@ def _snapshots(
     flat = {symbol: 0.0 for symbol in close}
     return [
         SimulationSnapshot(checkpoint="07:00", as_of=_at("07:00"), holding_returns_pct=flat),
-        SimulationSnapshot(checkpoint="09:15", as_of=_at("09:15"), holding_returns_pct=flat),
+        SimulationSnapshot(checkpoint="08:00", as_of=_at("08:00"), holding_returns_pct=flat),
         SimulationSnapshot(
             checkpoint="12:17",
             as_of=_at("12:17"),
@@ -56,14 +56,13 @@ def _snapshots(
 
 HDFC_CLOSE = {
     "HDFCBANK": -5.4,
-    "RELIANCE": 0.2,
-    "INFY": 2.1,
-    "TCS": -0.6,
-    "ICICIBANK": -0.4,
-    "BHARTIARTL": 0.8,
-    "WIPRO": 0.4,
-    "ITC": -0.3,
-    "SUNPHARMA": 0.5,
+    "RELIANCE": 3.2974,
+    "INFY": -0.4202,
+    "TCS": 0.3875,
+    "ICICIBANK": -0.7937,
+    "BHARTIARTL": 1.5038,
+    "ITC": -0.4267,
+    "SUNPHARMA": 0.2865,
 }
 
 
@@ -73,7 +72,7 @@ SCENARIOS = {
         name="HDFC company-specific shock",
         description="HDFC Bank falls far more than the banking sector and crosses the alert threshold.",
         snapshots=_snapshots(
-            {"HDFCBANK": -5.4, "ICICIBANK": -0.6},
+            HDFC_CLOSE,
             HDFC_CLOSE,
             {"Financial Services": -0.8},
         ),

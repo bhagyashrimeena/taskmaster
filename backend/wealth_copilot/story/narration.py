@@ -3,7 +3,9 @@
 import asyncio
 from io import BytesIO
 import json
+import logging
 from pathlib import Path
+import re
 from threading import RLock
 import wave
 
@@ -16,6 +18,10 @@ from .schemas import (
     StoryScene,
     StorySceneNarration,
 )
+
+
+logger = logging.getLogger(__name__)
+_SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$")
 
 
 def _scene_text(scene: StoryScene) -> str:
@@ -33,6 +39,8 @@ class StoryNarrationService:
         self._tasks: dict[str, asyncio.Task] = {}
 
     def _directory(self, story_id: str) -> Path:
+        if not _SAFE_ID.fullmatch(story_id) or story_id in {".", ".."}:
+            raise ValueError("Invalid story identifier")
         return self._root / story_id
 
     def _metadata(self, story_id: str) -> Path:
@@ -89,6 +97,19 @@ class StoryNarrationService:
             self._tasks[story.story_id] = asyncio.create_task(self._generate(story.story_id))
             return narration
 
+    async def clear(self) -> None:
+        """Cancel in-flight narration and discard the process-local index."""
+
+        with self._lock:
+            tasks = list(self._tasks.values())
+            self._tasks.clear()
+            self._items.clear()
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
     async def _generate(self, story_id: str) -> None:
         with self._lock:
             narration = self._items[story_id]
@@ -127,6 +148,7 @@ class StoryNarrationService:
                 narration.message = "Narration and visuals are synchronized."
                 self._persist(narration)
         except Exception:
+            logger.exception("Story narration failed for %s", story_id)
             with self._lock:
                 narration = self._items[story_id]
                 narration.status = StoryNarrationStatus.FALLBACK
@@ -137,6 +159,8 @@ class StoryNarrationService:
                 self._persist(narration)
 
     def get(self, story_id: str) -> StoryNarration | None:
+        if not _SAFE_ID.fullmatch(story_id) or story_id in {".", ".."}:
+            return None
         with self._lock:
             item = self._items.get(story_id) or self._load(story_id)
             if item:

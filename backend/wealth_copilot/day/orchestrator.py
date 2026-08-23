@@ -6,16 +6,20 @@ from zoneinfo import ZoneInfo
 from uuid import uuid4
 
 from ..agents.portfolio_agent import get_portfolio_summary
-from ..config import get_settings
+from ..config import application_today, get_settings
 from ..dashboard.service import dashboard_service
 from ..events import EventDecisionEngine, daily_event_store, get_event_fixture
-from ..events.schemas import EventAssessment, EventDecision
+from ..events.schemas import EventAssessment, EventDecision, EventSeverity
+from ..cases import FinancialCaseStatus, financial_case_service
+from ..market_data import MarketDataProvider, get_market_data_provider
 from ..media.schemas import AudioBriefType
 from ..media.service import media_service
 from ..portfolio.schemas import PortfolioSummary
 from ..story.service import DailyStoryService
 from ..simulation import simulation_service
+from ..taskmaster import TaskmasterDecision, taskmaster_operator
 from .schemas import (
+    DayRunMode,
     DayStatus,
     FinancialDayState,
     HoldingContribution,
@@ -27,30 +31,67 @@ from .schemas import (
     StepStatus,
     TomorrowEvent,
 )
-from .active import ArtifactProvenance
+from .active import ArtifactProvenance, AttentionDisposition
 from .store import FinancialDayStore, financial_day_store
 
 
 class DayOrchestrator:
     """Runs known checkpoints; it never asks a model what operation comes next."""
 
-    step_order = ("morning", "health", "event", "close", "evening", "tomorrow", "story")
+    step_order = (
+        "morning", "health", "open", "event", "watch", "sector", "learning",
+        "close", "intelligence", "actions", "evening", "tomorrow", "story",
+    )
 
     def __init__(
         self,
         store: FinancialDayStore | None = None,
         *,
         step_timeout_seconds: float | None = None,
+        market_data_provider: MarketDataProvider | None = None,
     ) -> None:
         self.store = store or financial_day_store
         self._task: asyncio.Task | None = None
         self._task_date: date | None = None
         self._lock = asyncio.Lock()
+        self.market_data = market_data_provider or get_market_data_provider()
         self.step_timeout_seconds = (
             step_timeout_seconds
             if step_timeout_seconds is not None
             else get_settings().demo_step_timeout_seconds
         )
+
+    def _advance_developer_clock(self, trading_date: date, checkpoint: str) -> None:
+        """Advance fixture time only for demo modes or the fixture trading date."""
+
+        state = self.store.get(trading_date)
+        fixture_date = simulation_service.snapshot().as_of.date()
+        if state.run_mode in {
+            DayRunMode.DEMO,
+            DayRunMode.PRESENTATION,
+        } or trading_date == fixture_date:
+            requested_hour, requested_minute = (
+                int(part) for part in checkpoint.split(":")
+            )
+            requested = requested_hour * 60 + requested_minute
+            available = [
+                snapshot.checkpoint
+                for snapshot in simulation_service.scenario().snapshots
+            ]
+            eligible = [
+                candidate
+                for candidate in available
+                if sum(
+                    part * multiplier
+                    for part, multiplier in zip(
+                        (int(value) for value in candidate.split(":")),
+                        (60, 1),
+                        strict=True,
+                    )
+                )
+                <= requested
+            ]
+            simulation_service.advance_to(eligible[-1] if eligible else available[0])
 
     @staticmethod
     async def _portfolio() -> PortfolioSummary:
@@ -103,6 +144,8 @@ class DayOrchestrator:
             step.completed_at = None
             step.detail = "Running this financial-day checkpoint."
             state.status = DayStatus.RUNNING
+            if state.started_at is None:
+                state.started_at = now
             state.active_step_id = step_id
             state.heartbeat_at = now
             state.last_error = None
@@ -144,10 +187,10 @@ class DayOrchestrator:
         self.store.update(mutate, trading_date)
 
     async def run_morning_pulse(self, trading_date: date | None = None) -> FinancialDayState:
-        selected = trading_date or date.today()
+        selected = trading_date or application_today()
         self._step_start(selected, "morning")
         try:
-            simulation_service.advance_to("07:00")
+            self._advance_developer_clock(selected, "07:00")
             dashboard = await dashboard_service.get_dashboard()
             portfolio = await self._portfolio()
             brief = await media_service.prepare(
@@ -185,10 +228,10 @@ class DayOrchestrator:
             raise
 
     async def run_portfolio_health(self, trading_date: date | None = None) -> FinancialDayState:
-        selected = trading_date or date.today()
+        selected = trading_date or application_today()
         self._step_start(selected, "health")
         try:
-            simulation_service.advance_to("09:15")
+            self._advance_developer_clock(selected, "08:00")
             portfolio = await self._portfolio()
             largest_holding = max(portfolio.holdings, key=lambda item: item.portfolio_weight)
             largest_sector = max(portfolio.sector_exposure, key=lambda item: item.portfolio_weight)
@@ -222,32 +265,151 @@ class DayOrchestrator:
                 critical_events=critical,
                 status=status,
                 explanation=(
-                    f"{len(flags)} concentration flag(s) and {critical} critical event(s) were found. "
+                    f"{len(flags)} concentration {'flag' if len(flags) == 1 else 'flags'} and "
+                    f"{critical} critical {'event' if critical == 1 else 'events'} were found. "
                     "This is an attention classification, not an investment recommendation."
                 ),
             )
             self.store.update(lambda state: setattr(state, "portfolio_health", health), selected)
             return self._step_complete(
-                selected, "health", f"{status.value} · {len(flags)} concentration flags."
+                selected,
+                "health",
+                f"{status.value} · {len(flags)} concentration {'flag' if len(flags) == 1 else 'flags'}.",
             )
         except Exception as exc:
             self._step_failed(selected, "health", exc)
             raise
 
+    async def run_market_open_monitor(
+        self, trading_date: date | None = None
+    ) -> FinancialDayState:
+        selected = trading_date or application_today()
+        self._step_start(selected, "open")
+        try:
+            snapshot = await self.market_data.get_market_snapshot()
+
+            def mutate(state: FinancialDayState) -> None:
+                if snapshot.snapshot_id not in state.market_snapshot_ids:
+                    state.market_snapshot_ids.append(snapshot.snapshot_id)
+
+            self.store.update(mutate, selected)
+            return self._step_complete(
+                selected,
+                "open",
+                f"Compared {len(snapshot.quotes)} portfolio instruments with index and sector context.",
+                [snapshot.snapshot_id],
+            )
+        except Exception as exc:
+            self._step_failed(selected, "open", exc)
+            raise
+
+    async def run_adaptive_market_watch(
+        self, trading_date: date | None = None
+    ) -> FinancialDayState:
+        selected = trading_date or application_today()
+        self._step_start(selected, "watch")
+        try:
+            snapshot = await self.market_data.get_market_snapshot()
+            observed_at = datetime.now(timezone.utc)
+
+            def mutate(state: FinancialDayState) -> None:
+                if snapshot.snapshot_id not in state.market_snapshot_ids:
+                    state.market_snapshot_ids.append(snapshot.snapshot_id)
+                state.market_watch_runs.append(observed_at)
+
+            self.store.update(mutate, selected)
+            return self._step_complete(
+                selected,
+                "watch",
+                f"Observed {len(snapshot.quotes)} instruments; no move crossed the alert rules.",
+                [snapshot.snapshot_id],
+            )
+        except Exception as exc:
+            self._step_failed(selected, "watch", exc)
+            raise
+
+    async def run_sector_deep_dive(
+        self, trading_date: date | None = None
+    ) -> FinancialDayState:
+        selected = trading_date or application_today()
+        self._step_start(selected, "sector")
+        try:
+            portfolio = await self._portfolio()
+            current = self.store.get(selected)
+            case_sectors = [
+                item.trigger.sector
+                for item in current.financial_cases
+                if item.trigger.sector and item.status != FinancialCaseStatus.CLOSED
+            ]
+            selected_sector = (
+                case_sectors[0]
+                if case_sectors
+                else max(portfolio.sector_exposure, key=lambda item: item.market_value).sector
+            )
+            exposure = next(
+                (
+                    float(item.portfolio_weight)
+                    for item in portfolio.sector_exposure
+                    if item.sector == selected_sector
+                ),
+                0.0,
+            )
+            self.store.update(
+                lambda state: setattr(state, "selected_sector", selected_sector), selected
+            )
+            return self._step_complete(
+                selected,
+                "sector",
+                f"{selected_sector} selected as today’s relevant sector ({exposure:.2f}% portfolio exposure).",
+            )
+        except Exception as exc:
+            self._step_failed(selected, "sector", exc)
+            raise
+
+    async def run_contextual_learning(
+        self, trading_date: date | None = None
+    ) -> FinancialDayState:
+        selected = trading_date or application_today()
+        self._step_start(selected, "learning")
+        try:
+            current = self.store.get(selected)
+            active_case = next(
+                (
+                    item
+                    for item in current.financial_cases
+                    if item.status != FinancialCaseStatus.CLOSED
+                ),
+                None,
+            )
+            if active_case and active_case.trigger.price_change_pct is not None and active_case.trigger.sector_change_pct is not None:
+                topic = "Sector divergence"
+                detail = "Explains why a holding can move differently from its sector using today's retained case."
+            elif current.portfolio_health and current.portfolio_health.concentration_flags:
+                topic = "Portfolio concentration"
+                detail = "Explains concentration using today's calculated portfolio health."
+            else:
+                topic = "Diversification"
+                detail = "Explains diversification using today's asset allocation."
+            self.store.update(
+                lambda state: setattr(state, "learning_topic", topic), selected
+            )
+            return self._step_complete(selected, "learning", f"{topic} · {detail}")
+        except Exception as exc:
+            self._step_failed(selected, "learning", exc)
+            raise
+
     async def handle_market_event(
         self, event_id: str | None = None, trading_date: date | None = None
     ) -> FinancialDayState:
-        selected = trading_date or date.today()
+        selected = trading_date or application_today()
         self._step_start(selected, "event")
         try:
-            simulation_service.advance_to("12:17")
+            self._advance_developer_clock(selected, "12:17")
             portfolio = await self._portfolio()
             day_state = self.store.get(selected)
-            event = (
-                get_event_fixture(event_id)
-                if event_id is not None
-                else simulation_service.get_market_event()
-            )
+            event = get_event_fixture(event_id) if event_id is not None else None
+            if event_id is None and day_state.run_mode != DayRunMode.REAL:
+                event = simulation_service.get_market_event()
             if event is None:
                 return self._step_complete(
                     selected,
@@ -274,9 +436,14 @@ class DayOrchestrator:
     def record_event(
         self, assessment: EventAssessment, trading_date: date | None = None
     ) -> FinancialDayState:
-        selected = trading_date or assessment.event.timestamp.date()
+        selected = trading_date or application_today()
 
         def mutate(state: FinancialDayState) -> None:
+            already_recorded = any(
+                item.event.event_id == assessment.event.event_id
+                for item in state.events_detected
+            )
+
             def upsert(items: list[EventAssessment]) -> None:
                 items[:] = [item for item in items if item.event.event_id != assessment.event.event_id]
                 items.append(assessment)
@@ -298,13 +465,55 @@ class DayOrchestrator:
             elif assessment.decision == EventDecision.IGNORE:
                 state.events_ignored.append(assessment)
 
+            existing_case = next(
+                (
+                    item
+                    for item in state.financial_cases
+                    if item.trigger.event_id == assessment.event.event_id
+                ),
+                None,
+            )
+            financial_case = financial_case_service.from_assessment(
+                assessment, existing=existing_case
+            )
+            if financial_case and existing_case is None:
+                state.financial_cases.append(financial_case)
+
+            cycle = taskmaster_operator.operate_event(assessment, financial_case)
+            if (
+                cycle.decision == TaskmasterDecision.INTERRUPT_NOW
+                and state.attention_budget.interrupted
+                >= state.attention_budget.interrupt_limit
+                and assessment.event.severity != EventSeverity.CRITICAL
+            ):
+                cycle.decision = TaskmasterDecision.DEFER_TO_EVENING
+                cycle.reason = (
+                    "The daily interruption budget is exhausted; retain this for the evening wrap."
+                )
+            state.operator_cycles[:] = [
+                item for item in state.operator_cycles if item.cycle_id != cycle.cycle_id
+            ]
+            state.operator_cycles.append(cycle)
+            if not already_recorded:
+                disposition = {
+                    TaskmasterDecision.INTERRUPT_NOW: AttentionDisposition.INTERRUPTED,
+                    TaskmasterDecision.MONITOR: AttentionDisposition.MONITORED,
+                    TaskmasterDecision.CLOSE_CASE: AttentionDisposition.IGNORED,
+                }.get(cycle.decision, AttentionDisposition.DEFERRED)
+                state.attention_budget.record(disposition)
+            state.open_case_ids = [
+                item.case_id
+                for item in state.financial_cases
+                if item.status != FinancialCaseStatus.CLOSED
+            ]
+
         return self.store.update(mutate, selected)
 
     async def run_market_close(self, trading_date: date | None = None) -> FinancialDayState:
-        selected = trading_date or date.today()
+        selected = trading_date or application_today()
         self._step_start(selected, "close")
         try:
-            simulation_service.advance_to("15:30")
+            self._advance_developer_clock(selected, "15:30")
             portfolio = await self._portfolio()
             current = self.store.get(selected)
             open_snapshot = current.portfolio_open_snapshot or self._snapshot(portfolio, "open")
@@ -381,11 +590,72 @@ class DayOrchestrator:
             self._step_failed(selected, "close", exc)
             raise
 
+    async def run_portfolio_intelligence(
+        self, trading_date: date | None = None
+    ) -> FinancialDayState:
+        selected = trading_date or application_today()
+        self._step_start(selected, "intelligence")
+        try:
+            portfolio = await self._portfolio()
+            holdings = sorted(
+                portfolio.holdings, key=lambda item: item.portfolio_weight, reverse=True
+            )
+            top_three = sum(float(item.portfolio_weight) for item in holdings[:3])
+            current = self.store.get(selected)
+            case_count = len(current.open_case_ids)
+            gap_count = len(current.unresolved_items)
+            summary = (
+                f"Top three holdings are {top_three:.2f}% of value; "
+                f"{case_count} {'case remains' if case_count == 1 else 'cases remain'} open and "
+                f"{gap_count} research {'gap remains' if gap_count == 1 else 'gaps remain'}."
+            )
+            self.store.update(
+                lambda state: setattr(
+                    state, "portfolio_intelligence_summary", summary
+                ),
+                selected,
+            )
+            return self._step_complete(selected, "intelligence", summary)
+        except Exception as exc:
+            self._step_failed(selected, "intelligence", exc)
+            raise
+
+    async def run_action_queue(
+        self, trading_date: date | None = None
+    ) -> FinancialDayState:
+        selected = trading_date or application_today()
+        self._step_start(selected, "actions")
+        try:
+            current = self.store.get(selected)
+            queue = [
+                f"Review {item.instrument or item.trigger.event_id} · {item.status.value}"
+                for item in current.financial_cases
+                if item.status != FinancialCaseStatus.CLOSED
+            ]
+            queue.extend(f"Resolve: {item}" for item in current.unresolved_items)
+            queue = list(dict.fromkeys(queue))
+            self.store.update(
+                lambda state: setattr(state, "action_queue", queue), selected
+            )
+            detail = (
+                "Nothing needs review or follow-up."
+                if not queue
+                else f"{len(queue)} {'item is' if len(queue) == 1 else 'items are'} ready for review or follow-up."
+            )
+            return self._step_complete(
+                selected,
+                "actions",
+                detail,
+            )
+        except Exception as exc:
+            self._step_failed(selected, "actions", exc)
+            raise
+
     async def run_evening_wrap(self, trading_date: date | None = None) -> FinancialDayState:
-        selected = trading_date or date.today()
+        selected = trading_date or application_today()
         self._step_start(selected, "evening")
         try:
-            simulation_service.advance_to("20:00")
+            self._advance_developer_clock(selected, "20:00")
             brief = await media_service.prepare(
                 AudioBriefType.EVENING, self.store.get(selected)
             )
@@ -403,10 +673,10 @@ class DayOrchestrator:
             raise
 
     async def prepare_tomorrow(self, trading_date: date | None = None) -> FinancialDayState:
-        selected = trading_date or date.today()
+        selected = trading_date or application_today()
         self._step_start(selected, "tomorrow")
         try:
-            simulation_service.advance_to("21:00")
+            self._advance_developer_clock(selected, "21:00")
             portfolio = await self._portfolio()
             weights = {item.symbol: float(item.portfolio_weight) for item in portfolio.holdings}
             sectors = {item.sector: float(item.portfolio_weight) for item in portfolio.sector_exposure}
@@ -462,16 +732,26 @@ class DayOrchestrator:
     async def generate_daily_story(
         self, trading_date: date | None = None
     ) -> FinancialDayState:
-        selected = trading_date or date.today()
+        selected = trading_date or application_today()
         self._step_start(selected, "story")
         try:
             story = await DailyStoryService(self.store).prepare(selected)
-            return self._step_complete(
+            completed = self._step_complete(
                 selected,
                 "story",
                 f"{len(story.scenes)} moments · {story.duration_seconds} sec recap ready.",
                 [story.story_id, *( [story.audio_brief_id] if story.audio_brief_id else [] )],
             )
+            if all(step.status == StepStatus.COMPLETE for step in completed.timeline):
+                def finish(state: FinancialDayState) -> None:
+                    now = datetime.now(timezone.utc)
+                    state.status = DayStatus.COMPLETE
+                    state.completed_at = now
+                    state.active_step_id = None
+                    state.heartbeat_at = now
+
+                completed = self.store.update(finish, selected)
+            return completed
         except Exception as exc:
             self._step_failed(selected, "story", exc)
             raise
@@ -485,6 +765,7 @@ class DayOrchestrator:
             fresh.scenario_id = simulation_service.state().scenario_id
             event = simulation_service.get_market_event()
             event_step = next(item for item in fresh.timeline if item.step_id == "event")
+            event_step.scheduled_time = "12:17"
             event_step.label = (
                 f"{event.company or event.sector} event" if event else "Market event check"
             )
@@ -492,7 +773,7 @@ class DayOrchestrator:
                 setattr(state, name, value)
             now = datetime.now(timezone.utc)
             state.status = DayStatus.RUNNING
-            state.run_mode = "demo"
+            state.run_mode = DayRunMode.DEMO
             state.started_at = now
             state.heartbeat_at = now
             state.simulated_duration_seconds = int(duration_seconds)
@@ -505,12 +786,12 @@ class DayOrchestrator:
     ) -> FinancialDayState:
         """Start a fresh clock-driven day without launching the legacy replay loop."""
 
-        selected = trading_date or date.today()
+        selected = trading_date or application_today()
         await self.cancel_background_run()
         self._initialize_demo(selected, 0)
 
         def mark_presentation(state: FinancialDayState) -> None:
-            state.run_mode = "presentation"
+            state.run_mode = DayRunMode.PRESENTATION
             state.simulated_duration_seconds = None
 
         return self.store.update(mark_presentation, selected)
@@ -520,7 +801,7 @@ class DayOrchestrator:
     ) -> FinancialDayState:
         """Mark a clock-driven day complete after its final idempotent checkpoint."""
 
-        selected = trading_date or date.today()
+        selected = trading_date or application_today()
 
         def finish(state: FinancialDayState) -> None:
             now = datetime.now(timezone.utc)
@@ -551,8 +832,14 @@ class DayOrchestrator:
         return (
             ("morning", orchestrator.run_morning_pulse),
             ("health", orchestrator.run_portfolio_health),
+            ("open", orchestrator.run_market_open_monitor),
+            ("watch", orchestrator.run_adaptive_market_watch),
+            ("sector", orchestrator.run_sector_deep_dive),
             ("event", orchestrator.handle_market_event),
+            ("learning", orchestrator.run_contextual_learning),
             ("close", orchestrator.run_market_close),
+            ("intelligence", orchestrator.run_portfolio_intelligence),
+            ("actions", orchestrator.run_action_queue),
             ("evening", orchestrator.run_evening_wrap),
             ("tomorrow", orchestrator.prepare_tomorrow),
             ("story", orchestrator.generate_daily_story),
@@ -565,7 +852,7 @@ class DayOrchestrator:
         duration_seconds: float = 72,
         resume: bool = False,
     ) -> FinancialDayState:
-        selected = trading_date or date.today()
+        selected = trading_date or application_today()
         if not resume:
             self._initialize_demo(selected, duration_seconds)
         else:
@@ -575,7 +862,7 @@ class DayOrchestrator:
                     for step in state.timeline
                 )
                 state.status = DayStatus.RUNNING
-                state.run_mode = "demo"
+                state.run_mode = DayRunMode.DEMO
                 state.last_error = None
                 state.heartbeat_at = datetime.now(timezone.utc)
                 if interrupted:
@@ -659,7 +946,7 @@ class DayOrchestrator:
         task.add_done_callback(lambda completed: self._supervise(completed, selected))
 
     async def start_demo_day(self, trading_date: date | None = None) -> FinancialDayState:
-        selected = trading_date or date.today()
+        selected = trading_date or application_today()
         async with self._lock:
             if self._task and not self._task.done():
                 return self.store.get(selected)
@@ -671,7 +958,7 @@ class DayOrchestrator:
     async def recover_interrupted_demo(
         self, trading_date: date | None = None
     ) -> FinancialDayState:
-        selected = trading_date or date.today()
+        selected = trading_date or application_today()
         async with self._lock:
             state = self.store.get(selected)
             if state.status != DayStatus.RUNNING or state.run_mode != "demo":
@@ -687,7 +974,7 @@ class DayOrchestrator:
             return self.store.get(selected)
 
     def current_state(self, trading_date: date | None = None) -> FinancialDayState:
-        selected = trading_date or date.today()
+        selected = trading_date or application_today()
         state = self.store.get(selected)
         if (
             state.status == DayStatus.RUNNING

@@ -25,8 +25,9 @@ export function AudioBriefControl({ type, compact = false }: { type: AudioBriefT
 
   const load = useCallback(async () => {
     try {
-      setBrief(await getAudioBrief(type));
-      setError(null);
+      const next = await getAudioBrief(type);
+      setBrief(next);
+      setError(next.status === "fallback" ? next.message : null);
     } catch {
       setError("Audio is unavailable right now");
     }
@@ -39,7 +40,10 @@ export function AudioBriefControl({ type, compact = false }: { type: AudioBriefT
     const timer = window.setInterval(() => {
       void getAudioStatus(brief.brief_id).then((next) => {
         setBrief(next);
-        if (["ready", "fallback"].includes(next.status)) setBusy(false);
+        if (["ready", "fallback"].includes(next.status)) {
+          setBusy(false);
+          setError(next.status === "fallback" ? next.message : null);
+        }
       }).catch(() => setBusy(false));
     }, 1800);
     return () => window.clearInterval(timer);
@@ -71,6 +75,8 @@ export function AudioBriefControl({ type, compact = false }: { type: AudioBriefT
     ? "Pause"
     : brief?.status === "ready"
     ? `Play · ${durationLabel(brief)}`
+    : brief?.status === "fallback"
+    ? `Retry Gemini · ${durationLabel(brief)}`
     : `Listen · ${durationLabel(brief)}`;
 
   return (

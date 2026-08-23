@@ -1,9 +1,15 @@
 declare module "@/lib/chat-storage.js" {
   type StoredMessage = {
+    id?: string;
     role: string;
     text: string;
     response?: import("./types").ConversationResponse;
     status?: "working" | "error";
+    retry?: {
+      message: string;
+      mode: import("./types").InteractionMode;
+      target: { type: "story" | "event" | "dashboard"; id?: string; title: string };
+    };
   };
 
   type StoredThread = {

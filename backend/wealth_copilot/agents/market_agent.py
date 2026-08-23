@@ -1,6 +1,6 @@
 """Market Intelligence Agent: Search-only or deterministic fixture-only."""
 
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 import logging
 from typing import Any
 
@@ -8,7 +8,7 @@ from google.adk.agents import Agent
 from google.adk.tools import google_search
 from google.genai import types
 
-from ..config import get_settings
+from ..config import application_today, get_settings
 from ..market.demo_provider import SimulatedNewsProvider
 
 
@@ -44,7 +44,7 @@ def create_market_agent(*, output_key: str | None = None) -> Agent:
             "and sectors. It does not rank or personalize them."
         ),
         instruction=(
-            f"You are Wealth Copilot's Market Intelligence Agent. Today is {date.today().isoformat()}. "
+            f"You are Wealth Copilot's Market Intelligence Agent. Today is {application_today().isoformat()}. "
             f"{source_instruction} Collect a portfolio-independent pool of "
             f"{settings.news_candidate_count} Indian financial stories, not five. Cover major listed companies, "
             "banking, information technology, energy, telecom, consumer, healthcare, regulators, macro events, "

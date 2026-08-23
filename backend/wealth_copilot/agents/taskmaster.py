@@ -13,6 +13,7 @@ from .event_watcher import get_event_day_state, run_event_watcher, save_event_ac
 from .portfolio_agent import portfolio_agent
 from .research_agent import research_agent
 from .media_agent import media_agent
+from ..taskmaster import get_taskmaster_operator_state
 
 
 logger = logging.getLogger(__name__)
@@ -27,9 +28,12 @@ def _log_agent_start(callback_context: object) -> None:
 root_agent = Agent(
     name="taskmaster",
     model=settings.adk_model,
-    description="Wealth Copilot supervisor for portfolios, daily briefs, and market-event decisions.",
+    description="Wealth Copilot operator deciding what deserves attention throughout the financial day.",
     instruction=(
-        "You are Wealth Copilot's conversational TaskMaster and intent router. Do not manually reproduce a "
+        "You are Wealth Copilot's conversational TaskMaster. The deterministic operator owns attention, case, "
+        "and financial decisions; preserve those decisions exactly. Use get_taskmaster_operator_state when the "
+        "user asks what should happen next, what is being monitored, or what remains open. You also route intents. "
+        "Do not manually reproduce a "
         "known workflow. For portfolio-only questions, call portfolio_agent. For 'what matters today', "
         "personalized news, or a daily market brief, call daily_brief_workflow exactly once and return its output "
         "unchanged; that workflow owns parallel collection, deterministic scoring, diversity, and explanation. "
@@ -62,6 +66,7 @@ root_agent = Agent(
         run_event_watcher,
         get_event_day_state,
         save_event_action,
+        get_taskmaster_operator_state,
     ],
     before_agent_callback=_log_agent_start,
 )

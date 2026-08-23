@@ -34,6 +34,7 @@ _SECTOR_ALIASES = {
     "banking": "financialservices",
     "banks": "financialservices",
     "finance": "financialservices",
+    "financials": "financialservices",
     "telecom": "telecommunication",
     "pharma": "healthcare",
     "pharmaceuticals": "healthcare",
@@ -108,7 +109,12 @@ class RelevanceEngine:
             if any(_company_matches(holding.symbol, company) for company in candidate.companies)
         ]
         affected_symbols = [holding.symbol for holding in affected]
-        direct_exposure = round(sum(float(holding.portfolio_weight) for holding in affected), 2)
+        affected_value = sum((holding.market_value for holding in affected), start=0)
+        direct_exposure = (
+            round(float(affected_value / portfolio.portfolio_value * 100), 1)
+            if portfolio.portfolio_value
+            else 0.0
+        )
 
         candidate_sectors = {_sector_token(sector) for sector in candidate.sectors}
         candidate_sectors.update(
@@ -116,11 +122,11 @@ class RelevanceEngine:
         )
         sector_exposure = round(
             sum(
-                float(holding.portfolio_weight)
-                for holding in portfolio.holdings
-                if holding.sector and _sector_token(holding.sector) in candidate_sectors
+                float(sector.portfolio_weight)
+                for sector in portfolio.sector_exposure
+                if _sector_token(sector.sector) in candidate_sectors
             ),
-            2,
+            1,
         )
 
         materiality, materiality_points = _MATERIALITY[candidate.event_type]

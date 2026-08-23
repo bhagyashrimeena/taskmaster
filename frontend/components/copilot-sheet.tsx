@@ -31,13 +31,22 @@ export interface CopilotRequest {
   message?: string;
 }
 
+type RetryRequest = {
+  message: string;
+  mode: InteractionMode;
+  target: CopilotTarget;
+};
+
 type ChatMessage = {
   id: string;
   role: "user" | "assistant" | "progress";
   text: string;
   response?: ConversationResponse;
   status?: "working" | "error";
+  retry?: RetryRequest;
 };
+
+const SAFE_CONNECTION_ERROR = "We couldn’t reach Wealth Copilot. Your dashboard is still available.";
 
 function targetFields(target: CopilotTarget) {
   return {
@@ -51,13 +60,18 @@ function messageId(prefix: string) {
 }
 
 function storedMessages(): ChatMessage[] {
-  return (readStoredThread()?.messages ?? []).map((message, index) => ({
-    id: `${message.role}-${index}`,
-    role: message.role === "assistant" ? "assistant" : message.role === "progress" ? "progress" : "user",
-    text: message.text,
-    response: "response" in message ? message.response as ConversationResponse : undefined,
-    status: "status" in message ? message.status as ChatMessage["status"] : undefined,
-  }));
+  return (readStoredThread()?.messages ?? []).map((message, index) => {
+    const role = message.role === "assistant" ? "assistant" : message.role === "progress" ? "progress" : "user";
+    const status = "status" in message ? message.status as ChatMessage["status"] : undefined;
+    return {
+      id: typeof message.id === "string" ? message.id : `${message.role}-${index}`,
+      role,
+      text: status === "error" ? SAFE_CONNECTION_ERROR : message.text,
+      response: "response" in message ? message.response as ConversationResponse : undefined,
+      status,
+      retry: "retry" in message ? message.retry as RetryRequest : undefined,
+    };
+  });
 }
 
 function sourceKey(source: ConversationResponse["sources"][number]) {
@@ -91,8 +105,11 @@ export function CopilotSheet({ request, onClose }: { request: CopilotRequest | n
   const messagesRef = useRef<ChatMessage[]>([]);
   const latestResponse = [...messages].reverse().find((item) => item.role === "assistant")?.response ?? null;
 
-  useEffect(() => () => {
-    mountedRef.current = false;
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -130,7 +147,7 @@ export function CopilotSheet({ request, onClose }: { request: CopilotRequest | n
       const restored = storedMessages();
       messagesRef.current = restored;
       setMessages(restored);
-      if (stored.unread_count) writeStoredThread({ ...stored, unread_count: 0 });
+      writeStoredThread({ ...stored, messages: restored, unread_count: 0 });
     });
   }, []);
 
@@ -175,18 +192,26 @@ export function CopilotSheet({ request, onClose }: { request: CopilotRequest | n
     setIsMinimized(false);
   };
 
-  const submitMessage = async (message: string, mode: InteractionMode = "chat", target = request?.target) => {
+  const submitMessage = async (
+    message: string,
+    mode: InteractionMode = "chat",
+    target = request?.target,
+    retryMessageId?: string,
+  ) => {
     if (!target) return;
     const operationId = operationRef.current + 1;
     operationRef.current = operationId;
     const userMessage: ChatMessage = { id: messageId("user"), role: "user", text: message };
+    const retry: RetryRequest = { message, mode, target };
     const progressMessage: ChatMessage = {
-      id: messageId("progress"),
+      id: retryMessageId ?? messageId("progress"),
       role: "progress",
-      text: mode === "research" ? "Research Agent\nSearching current sources..." : "TaskMaster\nChecking the event and your portfolio context...",
+      text: mode === "research" ? "Deep research\nSearching current sources..." : "Wealth Copilot\nChecking the event and your portfolio context...",
       status: "working",
     };
-    const nextMessages = [...messagesRef.current, userMessage, progressMessage];
+    const nextMessages = retryMessageId
+      ? messagesRef.current.map((item) => item.id === retryMessageId ? progressMessage : item)
+      : [...messagesRef.current, userMessage, progressMessage];
     messagesRef.current = nextMessages;
     setMessages(nextMessages);
     setLoading(true);
@@ -200,7 +225,7 @@ export function CopilotSheet({ request, onClose }: { request: CopilotRequest | n
           await new Promise((resolve) => window.setTimeout(resolve, 1500));
           const current = await getResearch(job.job_id);
           if (operationRef.current !== operationId) return;
-          replaceMessage(progressMessage.id, { ...progressMessage, text: `Research Agent\n${current.message}` });
+          replaceMessage(progressMessage.id, { ...progressMessage, text: `Deep research\n${current.message}` });
           if (["complete", "fallback"].includes(current.status) && current.result) {
             const assistant: ChatMessage = { id: current.result.message_id, role: "assistant", text: current.result.answer, response: current.result };
             replaceMessage(progressMessage.id, assistant);
@@ -221,13 +246,14 @@ export function CopilotSheet({ request, onClose }: { request: CopilotRequest | n
       setConversationId(response.conversation_id);
       const finished = nextMessages.map((item) => item.id === progressMessage.id ? assistant : item);
       persist(finished, target, response, !mountedRef.current || minimizedRef.current);
-    } catch (caught) {
+    } catch {
       if (operationRef.current !== operationId) return;
       const errorMessage: ChatMessage = {
-        id: messageId("error"),
+        id: progressMessage.id,
         role: "progress",
-        text: caught instanceof Error ? caught.message : "Wealth Copilot is temporarily unavailable.",
+        text: SAFE_CONNECTION_ERROR,
         status: "error",
+        retry,
       };
       replaceMessage(progressMessage.id, errorMessage);
       const failed = nextMessages.map((item) => item.id === progressMessage.id ? errorMessage : item);
@@ -239,10 +265,13 @@ export function CopilotSheet({ request, onClose }: { request: CopilotRequest | n
 
   useEffect(() => {
     if (!request || handledKey.current === request.key) return;
-    handledKey.current = request.key;
-    window.queueMicrotask(() => {
+    const requestKey = request.key;
+    const timer = window.setTimeout(() => {
+      if (handledKey.current === requestKey) return;
+      handledKey.current = requestKey;
       if (request.message) void submitMessage(request.message, request.mode, request.target);
-    });
+    }, 0);
+    return () => window.clearTimeout(timer);
     // request.key intentionally represents a new interaction.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [request?.key]);
@@ -273,6 +302,24 @@ export function CopilotSheet({ request, onClose }: { request: CopilotRequest | n
     setFeedback(value);
   };
 
+  const dismissMessage = (id: string) => {
+    if (!request) return;
+    const nextMessages = messagesRef.current.filter((item) => item.id !== id);
+    messagesRef.current = nextMessages;
+    setMessages(nextMessages);
+    persist(nextMessages, request.target);
+  };
+
+  const retryFailedMessage = (message: ChatMessage) => {
+    if (!message.retry) return;
+    void submitMessage(
+      message.retry.message,
+      message.retry.mode,
+      message.retry.target,
+      message.id,
+    );
+  };
+
   const renderAssistant = (message: ChatMessage) => {
     const response = message.response;
     if (!response) return <p>{message.text}</p>;
@@ -281,6 +328,7 @@ export function CopilotSheet({ request, onClose }: { request: CopilotRequest | n
     const sources = uniqueSources(response);
     return (
       <>
+        {response.context.source_checkpoint && <span className="snapshot-cue">Exposure snapshot · {response.context.source_checkpoint} IST</span>}
         <p>{answer}</p>
         {remainder && <details className="answer-details"><summary>Full answer</summary><p>{remainder}</p></details>}
         <details className="copilot-details"><summary>Verified facts</summary><section className="evidence-panel">{response.context.facts.map((fact) => <p key={fact}><Check size={13} />{fact}</p>)}</section></details>
@@ -314,7 +362,7 @@ export function CopilotSheet({ request, onClose }: { request: CopilotRequest | n
             {messages.map((message) => message.role === "user" ? (
               <article className="chat-message chat-message--user" key={message.id}><span className="chat-message__author">You</span><p>{message.text}</p></article>
             ) : message.role === "progress" ? (
-              <article className={`chat-message chat-message--progress ${message.status === "error" ? "is-error" : ""}`} key={message.id}><span className="chat-message__author">{message.status === "error" ? "Wealth Copilot" : message.text.split("\n")[0]}</span><p>{message.text.split("\n").slice(1).join("\n") || message.text}</p>{message.status !== "error" && <LoaderCircle className="spin" size={14} />}</article>
+              <article className={`chat-message chat-message--progress ${message.status === "error" ? "is-error" : ""}`} key={message.id}><span className="chat-message__author">{message.status === "error" ? "Wealth Copilot" : message.text.split("\n")[0]}</span><p>{message.text.split("\n").slice(1).join("\n") || message.text}</p>{message.status !== "error" && <LoaderCircle className="spin" size={14} />}{message.status === "error" && <div className="chat-error-actions">{message.retry ? <button type="button" onClick={() => retryFailedMessage(message)} disabled={loading}>Try again</button> : <button type="button" onClick={() => dismissMessage(message.id)}>Dismiss</button>}</div>}</article>
             ) : (
               <article className="chat-message chat-message--assistant" key={message.id}><span className="chat-message__author"><Sparkles size={13} /> Wealth Copilot <small>{message.response?.route?.replaceAll("_", " ")}</small></span>{renderAssistant(message)}{message.response && <div className="response-actions"><button className="secondary-button" onClick={() => void submitMessage("Research this more deeply.", "research")} disabled={loading}><BookOpenText size={15} /> Research deeper</button><span>Was this useful?</span><button className={`feedback-button ${feedback === "useful" ? "is-active" : ""}`} aria-label="Useful" onClick={() => void sendFeedback("useful")}><ThumbsUp size={14} /></button><button className={`feedback-button ${feedback === "not_relevant" ? "is-active" : ""}`} aria-label="Not relevant" onClick={() => void sendFeedback("not_relevant")}><ThumbsDown size={14} /></button></div>}</article>
             ))}

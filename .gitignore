@@ -40,6 +40,8 @@ playwright/.cache/
 *.wav
 *.tmp
 artifacts/
+diagrams/*.pptx
+diagrams/*.pdf
 
 # Temporary, backup, and editor-generated files
 *.bak

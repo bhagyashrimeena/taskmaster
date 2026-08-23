@@ -9,9 +9,11 @@ import pytest
 from fastapi.testclient import TestClient
 
 from wealth_copilot.api import app
+from wealth_copilot.config import application_today
 from wealth_copilot.day.orchestrator import DayOrchestrator
 from wealth_copilot.day.scheduler import DayScheduler
 from wealth_copilot.day.schemas import (
+    DayRunMode,
     DayStatus,
     FinancialDayState,
     QuestionAsked,
@@ -65,7 +67,10 @@ async def test_demo_day_completes_with_attribution_and_continuity(
         if item.symbol == "HDFCBANK"
     )
     assert hdfc.daily_return_pct == -5.4
-    assert hdfc.contribution_percentage_points == -0.97
+    assert hdfc.contribution_percentage_points == round(
+        hdfc.portfolio_weight_pct * hdfc.daily_return_pct / 100,
+        2,
+    )
     assert "hdfc-bank-sudden-fall" in state.market_close_review.alert_event_ids
     assert [item.relevance_rank for item in state.tomorrow_events] == [1, 2]
     assert state.tomorrow_events[0].portfolio_exposure_pct >= state.tomorrow_events[1].portfolio_exposure_pct
@@ -80,6 +85,7 @@ async def test_evening_wrap_uses_saves_questions_close_and_unresolved_state(
 ) -> None:
     selected = date(2026, 8, 18)
     orchestrator = DayOrchestrator(store)
+    store.update(lambda state: setattr(state, "run_mode", DayRunMode.DEMO), selected)
     await orchestrator.run_morning_pulse(selected)
     await orchestrator.handle_market_event(trading_date=selected)
     await orchestrator.run_market_close(selected)
@@ -129,6 +135,71 @@ async def test_scheduler_runs_due_operations_once() -> None:
     ]
     assert calls == ["morning", "health", "close", "evening", "tomorrow", "story"]
     assert second == []
+
+
+@pytest.mark.asyncio
+async def test_scheduler_retries_failed_checkpoint_without_dying() -> None:
+    calls: list[str] = []
+
+    class FlakyOrchestrator:
+        def __init__(self) -> None:
+            self.failed = False
+
+        async def run_morning_pulse(self, **_):
+            calls.append("morning")
+            if not self.failed:
+                self.failed = True
+                raise RuntimeError("temporary failure")
+
+        async def run_portfolio_health(self, **_):
+            calls.append("health")
+
+        async def run_market_close(self, **_):
+            calls.append("close")
+
+        async def run_evening_wrap(self, **_):
+            calls.append("evening")
+
+        async def prepare_tomorrow(self, **_):
+            calls.append("tomorrow")
+
+        async def generate_daily_story(self, **_):
+            calls.append("story")
+
+    scheduler = DayScheduler(FlakyOrchestrator())
+    now = datetime(2026, 8, 18, 7, 0, tzinfo=ZoneInfo("Asia/Kolkata"))
+
+    assert await scheduler.run_due(now) == []
+    assert await scheduler.run_due(now) == ["run_morning_pulse"]
+    assert calls == ["morning", "morning"]
+
+
+@pytest.mark.asyncio
+async def test_scheduler_recovers_completed_checkpoint_from_day_store(
+    store: FinancialDayStore,
+) -> None:
+    selected = date(2026, 8, 18)
+
+    def mark_morning_complete(state: FinancialDayState) -> None:
+        morning = next(step for step in state.timeline if step.step_id == "morning")
+        morning.status = StepStatus.COMPLETE
+
+    store.update(mark_morning_complete, selected)
+
+    class RestartedOrchestrator:
+        def __init__(self) -> None:
+            self.store = store
+            self.calls = 0
+
+        async def run_morning_pulse(self, trading_date: date) -> None:
+            self.calls += 1
+
+    orchestrator = RestartedOrchestrator()
+    scheduler = DayScheduler(orchestrator)
+    now = datetime(2026, 8, 18, 7, 0, tzinfo=ZoneInfo("Asia/Kolkata"))
+
+    assert await scheduler.run_due(now) == []
+    assert orchestrator.calls == 0
 
 
 @pytest.mark.asyncio
@@ -201,7 +272,7 @@ async def test_interrupted_demo_resumes_from_first_unfinished_step(
 
 def test_day_api_is_nonblocking(monkeypatch: pytest.MonkeyPatch) -> None:
     expected = FinancialDayState(
-        trading_date=date.today(), status=DayStatus.RUNNING, run_mode="demo"
+        trading_date=application_today(), status=DayStatus.RUNNING, run_mode="demo"
     )
 
     async def fake_start():

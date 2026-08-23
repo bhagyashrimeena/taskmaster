@@ -55,7 +55,7 @@ class AudioScriptBuilder:
             f"Good morning. {dashboard.attention_message}. Your portfolio is valued at "
             f"approximately {dashboard.portfolio.portfolio_value / 100000:.2f} lakh rupees."
         )
-        if event.notification_required:
+        if event and event.notification_required:
             event_text = (
                 f"The main event is {event.event.company}. It moved {event.event.price_change_pct:.1f} percent, "
                 f"compared with {event.event.sector_change_pct:.1f} percent for its sector. "
@@ -91,13 +91,16 @@ class AudioScriptBuilder:
     ) -> tuple[list[AudioSection], str, list[str], list[str]]:
         event = dashboard.important_event
         by_id = {story.id: story for story in dashboard.daily_brief.stories}
-        saved_ids = list(daily_state.saved_story_ids)
+        saved_ids = list(dict.fromkeys(daily_state.saved_story_ids))
         if financial_day:
             saved_ids.extend(item for item in financial_day.saved_stories if item not in saved_ids)
         saved = [by_id[item] for item in saved_ids if item in by_id]
-        selected = saved[:3] or dashboard.daily_brief.stories[:2]
+        # The wrap reports the complete saved-item count, but narrates only the
+        # two highest-priority saved stories so a busy day still fits the
+        # approved 90-second / 190-word boundary.
+        selected = saved[:2] or dashboard.daily_brief.stories[:2]
         opening = "Here is your financial day in about ninety seconds."
-        if event.notification_required:
+        if event and event.notification_required:
             event_text = (
                 f"The main event was {event.event.company}, which moved {event.event.price_change_pct:.1f} percent "
                 f"while its sector moved {event.event.sector_change_pct:.1f} percent. It mattered because your direct "
@@ -127,8 +130,8 @@ class AudioScriptBuilder:
                 f"{dashboard.portfolio.holdings_count} holdings. Your two largest sector exposures remain "
                 f"{sector_text}. They provide context, not a suggested action."
             )
-        if saved:
-            saved_intro = f"You saved {len(saved)} item{'s' if len(saved) != 1 else ''} to revisit."
+        if saved_ids:
+            saved_intro = f"You saved {len(saved_ids)} item{'s' if len(saved_ids) != 1 else ''} to revisit."
         else:
             saved_intro = "You did not save a story today, so this wrap uses the two highest-ranked items."
         stories_text = saved_intro + " " + " ".join(
@@ -156,7 +159,7 @@ class AudioScriptBuilder:
             AudioSection(title="Close", text=close),
         ]
         script = _clean(" ".join(section.text for section in sections))
-        used_events = [event.event.event_id]
+        used_events = [event.event.event_id] if event else []
         saved_event_ids = list(daily_state.saved_event_ids)
         if financial_day:
             saved_event_ids.extend(item for item in financial_day.saved_events if item not in saved_event_ids)
@@ -189,7 +192,10 @@ class AudioScriptBuilder:
                 f"{event.company} was flagged at {event.relevance_score:.2f} relevance because it diverged from its sector."
             )
         else:
-            event_text = "No retained event crossed the alert threshold today."
+            event_text = (
+                "No market event crossed today's alert threshold. "
+                "Routine movement stayed below the interruption rules."
+            )
         if story.advisor_interaction:
             advisor_text = (
                 "Your advisor's perspective was received and retained as human commentary."
@@ -200,7 +206,7 @@ class AudioScriptBuilder:
             advisor_text = ""
         tomorrow_text = (
             f"Tomorrow, {len(story.tomorrow_events)} portfolio-relevant "
-            f"item{'s are' if len(story.tomorrow_events) != 1 else ' is'} retained. "
+            f"item{'s are' if len(story.tomorrow_events) != 1 else ' is'} scheduled for review. "
             "This is context, not an investment instruction."
         )
         sections = [

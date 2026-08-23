@@ -5,6 +5,14 @@ This is the single golden path for the submission video and live judging. Use th
 The portfolio and event feed are deterministic; the normal market-news path remains
 Google Search grounded.
 
+## Preflight
+
+With both services running, click **Restart** once and leave the presentation
+paused at 07:00. From `frontend/`, run `npm run demo:prewarm`. Continue only when
+it reports `ready`; keep that run and begin with **Next** rather than restarting
+again. This prewarms live news and Morning Pulse audio without advancing the
+financial-day clock.
+
 ## 2–3 minute script
 
 **Opening — 10 seconds**
@@ -35,8 +43,8 @@ Press **Next**.
 Press **Next**, then pause and let the alert appear before speaking.
 
 > I did not ask Wealth Copilot a question here. It detected HDFC Bank falling 5.4%
-> while the broader banking sector moved only 0.8%. It checked my 18.01% direct
-> exposure, investigated the market context, calculated 94.21 relevance, and decided
+> while the broader banking sector moved only 0.8%. It checked my 17.21% direct
+> exposure, investigated the market context, calculated 93.11 relevance, and decided
 > this deserved an alert.
 
 Click **View**, then **Explain**. Ask: “What caused this?” Continue with **Learn more**
@@ -101,10 +109,11 @@ deterministic.
 
 - Five portfolio-relevant stories selected from roughly 14–15 candidates.
 - Three signals elevated for attention in the golden path.
-- HDFC Bank direct exposure: **18.01%**.
-- HDFC Bank event relevance: **94.21/100**.
+- HDFC Bank direct exposure: **17.21%**.
+- HDFC Bank sector exposure: **27.26%**.
+- HDFC Bank event relevance: **93.11/100**.
 - HDFC Bank contribution at close: approximately **-0.97 percentage points**.
-- **87 backend tests** plus frontend lint, typecheck, production build, and browser smoke tests.
+- **133 backend tests** plus frontend lint, typecheck, production build, and browser smoke tests.
 - Browser-verified presentation flow: one event, one shared run ID, no duplicate
   checkpoints, no console errors, and presentation controls hidden in normal mode.
 

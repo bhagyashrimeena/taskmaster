@@ -43,20 +43,12 @@ async def test_clock_crosses_due_checkpoints_once_and_keeps_one_day_state(
     selected = date(2026, 8, 18)
     orchestrator = DayOrchestrator(FinancialDayStore(tmp_path / "days"))
     calls: list[str] = []
-    for step_id, operation in [
-        ("morning", "run_morning_pulse"),
-        ("health", "run_portfolio_health"),
-        ("event", "handle_market_event"),
-        ("close", "run_market_close"),
-        ("evening", "run_evening_wrap"),
-        ("tomorrow", "prepare_tomorrow"),
-        ("story", "generate_daily_story"),
-    ]:
+    clock = PresentationClockService(orchestrator)
+    for step_id, operation in clock.operations.items():
         monkeypatch.setattr(
             orchestrator, operation, _stub_operation(orchestrator, step_id, calls)
         )
 
-    clock = PresentationClockService(orchestrator)
     started = await clock.advance(317, selected)
     assert started.status == PresentationClockStatus.RUNNING
     assert clock._task is not None
@@ -66,14 +58,14 @@ async def test_clock_crosses_due_checkpoints_once_and_keeps_one_day_state(
     day = orchestrator.store.get(selected)
     assert state.current_time == "12:17"
     assert state.status == PresentationClockStatus.PAUSED
-    assert calls == ["morning", "health", "event"]
+    assert calls == ["morning", "health", "open", "watch", "sector", "event"]
     assert day.run_mode == "presentation"
-    assert state.completed_checkpoint_ids == ["morning", "health", "event"]
+    assert set(state.completed_checkpoint_ids) == {"morning", "health", "open", "watch", "sector", "event"}
 
     await clock.advance(1, selected)
     assert clock._task is not None
     await clock._task
-    assert calls == ["morning", "health", "event"]
+    assert calls == ["morning", "health", "open", "watch", "sector", "event"]
 
 
 @pytest.mark.asyncio
@@ -114,6 +106,11 @@ async def test_clock_reconstructs_persisted_position_after_service_restart(
         "run_morning_pulse",
         _stub_operation(orchestrator, "morning", []),
     )
+    monkeypatch.setattr(
+        orchestrator,
+        "run_portfolio_health",
+        _stub_operation(orchestrator, "health", []),
+    )
     first_clock = PresentationClockService(orchestrator)
     await first_clock.advance(60, selected)
     assert first_clock._task is not None
@@ -137,6 +134,36 @@ def test_presentation_clock_api_is_separate_from_normal_day_api() -> None:
         paused = client.post("/api/v1/presentation-clock/pause")
         assert paused.status_code == 200
         assert paused.json()["status"] == "paused"
+
+        canonical = client.get("/api/v1/day/clock")
+        assert canonical.status_code == 200
+        assert canonical.json() == paused.json()
+
+
+@pytest.mark.asyncio
+async def test_clock_completes_all_thirteen_checkpoints_in_scheduled_order(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    selected = date(2026, 8, 18)
+    orchestrator = DayOrchestrator(FinancialDayStore(tmp_path / "days"))
+    calls: list[str] = []
+    clock = PresentationClockService(orchestrator)
+    await orchestrator.initialize_presentation_day(selected)
+    for step_id, operation in clock.operations.items():
+        monkeypatch.setattr(
+            orchestrator, operation, _stub_operation(orchestrator, step_id, calls)
+        )
+
+    await clock.advance(841, selected)
+    assert clock._task is not None
+    await clock._task
+
+    assert calls == [
+        "morning", "health", "open", "watch", "sector", "event", "learning",
+        "close", "intelligence", "actions", "evening", "tomorrow", "story",
+    ]
+    assert clock.state(selected).status == PresentationClockStatus.COMPLETE
+    assert len(clock.state(selected).completed_checkpoint_ids) == 13
 
 
 @pytest.mark.parametrize(

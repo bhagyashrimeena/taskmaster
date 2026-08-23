@@ -65,11 +65,11 @@ async def main() -> None:
     assert "run_event_watcher" in calls, report
     assert report["decision"] == "ALERT", report
     assert report["notification_required"] is True, report
-    assert report["affected_portfolio_percentage"] == 18.01, report
+    assert report["affected_portfolio_percentage"] == 17.21, report
+    assert report["relevance_score"] == 93.11, report
     assert len(report["trace_stages"]) == 5, report
     print(json.dumps(report, ensure_ascii=True))
 
 
 if __name__ == "__main__":
     asyncio.run(main())
-

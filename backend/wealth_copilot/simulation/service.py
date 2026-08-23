@@ -12,7 +12,7 @@ class SimulationService:
         settings = get_settings()
         self._lock = RLock()
         self._scenario_id = settings.simulation_scenario_id
-        self._checkpoint = "09:15"
+        self._checkpoint = "08:00"
 
     def load_scenario(self, scenario_id: str) -> SimulationState:
         if scenario_id not in SCENARIOS:

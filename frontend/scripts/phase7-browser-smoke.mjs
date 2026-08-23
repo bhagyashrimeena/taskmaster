@@ -24,7 +24,7 @@ try {
   await page.getByTestId("prepare-advisor-packet").click();
   await page.getByText("Packet prepared", { exact: true }).waitFor();
   await page.getByTestId("advisor-sheet").getByText(
-    "Your direct exposure is 18.01% and sector exposure is 28.01%.",
+    "Your direct exposure is 17.21% and sector exposure is 27.26%.",
     { exact: true },
   ).waitFor();
   await page.getByTestId("review-advisor-email").click();

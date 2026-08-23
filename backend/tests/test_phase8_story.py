@@ -13,6 +13,7 @@ from wealth_copilot.advisor.schemas import (
     AdvisorResponse,
     AdvisorStatus,
 )
+from wealth_copilot.config import application_today
 from wealth_copilot.api import app
 from wealth_copilot.day.orchestrator import DayOrchestrator
 from wealth_copilot.day.store import FinancialDayStore
@@ -65,8 +66,8 @@ async def test_advisor_scene_is_conditional_and_invalidates_cached_story(
         target_type="event",
         target_id="hdfc-bank-sudden-fall",
         title="HDFC Bank unusual move",
-        exposure="18.01% direct exposure",
-        relevance="94.21 relevance",
+        exposure="17.21% direct exposure",
+        relevance="93.11 relevance",
         facts=["HDFC Bank moved -5.4%."],
         interpretations=["The move differed from the sector."],
         unknowns=["The confirmed cause remains uncertain."],
@@ -117,6 +118,7 @@ async def test_missing_optional_sections_are_skipped_gracefully(store: Financial
         state.advisor_responses = []
         state.saved_stories = []
         state.saved_events = []
+        state.tomorrow_events = []
 
     store.update(make_quiet, selected)
     story = await DailyStoryService(store).prepare(selected)
@@ -148,7 +150,7 @@ async def test_short_narration_reuses_media_cache_and_contains_no_recommendation
 async def test_story_endpoint_uses_completed_financial_day(
     store: FinancialDayStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    await DayOrchestrator(store).run_demo_day(date.today(), duration_seconds=0)
+    await DayOrchestrator(store).run_demo_day(application_today(), duration_seconds=0)
     monkeypatch.setattr(daily_story_service, "store", store)
     response = TestClient(app).get("/api/v1/story/today")
     assert response.status_code == 200

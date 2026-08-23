@@ -2,6 +2,7 @@
 
 from datetime import date, datetime, timezone
 
+from ..config import application_today
 from ..day.store import FinancialDayStore, financial_day_store
 from ..day.integrity import checkpoint_released
 from ..media.schemas import AudioBriefType
@@ -15,7 +16,7 @@ class DailyStoryService:
         self.store = store or financial_day_store
 
     async def prepare(self, trading_date: date | None = None) -> DailyWealthStory:
-        selected = trading_date or date.today()
+        selected = trading_date or application_today()
         state = self.store.get(selected)
         if state.run_mode == "presentation" and not checkpoint_released(state, "21:01"):
             raise ValueError("Daily Wealth Story is available after the financial day is complete")

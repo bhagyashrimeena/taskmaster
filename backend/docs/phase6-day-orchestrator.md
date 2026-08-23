@@ -36,8 +36,9 @@ The state retains:
 
 Demo close attribution uses explicit simulated daily returns. Contribution is
 calculated as `portfolio_weight × daily_return / 100`, expressed in portfolio
-percentage points. HDFCBANK's 18.01% weight and -5.4% return therefore produce
-approximately -0.97 percentage points.
+percentage points. HDFCBANK's 18.01% opening weight and -5.4% return therefore
+produce approximately -0.97 percentage points. Event exposure is calculated
+separately from the current checkpoint market values.
 
 ## API
 

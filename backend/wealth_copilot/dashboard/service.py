@@ -3,6 +3,7 @@
 import asyncio
 from datetime import datetime, time, timezone
 import json
+import logging
 from uuid import uuid4
 
 from google.adk.runners import InMemoryRunner
@@ -14,7 +15,7 @@ from ..agents.daily_brief_workflow import (
 )
 from ..agents.market_agent import create_market_agent
 from ..agents.portfolio_agent import get_portfolio_summary
-from ..config import get_settings
+from ..config import application_now, get_settings
 from ..events import EventDecisionEngine, daily_event_store
 from ..events.schemas import EventSeverity, MarketEvent, MarketEventType
 from ..market.cache import news_candidate_cache, refresh_news
@@ -39,12 +40,14 @@ from ..events.schemas import (
 )
 from .schemas import (
     ActivityItem,
+    AllocationView,
     DailyBriefView,
     DashboardResponse,
     DataSource,
     FreshnessStatus,
     FreshnessView,
     HoldingView,
+    PerformanceView,
     PortfolioView,
     RefreshPhase,
     RefreshView,
@@ -54,6 +57,13 @@ from .schemas import (
 
 
 settings = get_settings()
+logger = logging.getLogger(__name__)
+
+
+def attention_message_for_count(count: int) -> str:
+    if count == 1:
+        return "1 thing deserves your attention today"
+    return f"{count} things deserve your attention today"
 
 
 class DashboardService:
@@ -66,17 +76,32 @@ class DashboardService:
         self._last_refresh_news_status: FreshnessStatus | None = None
         self._canonical_task: asyncio.Task | None = None
 
+    async def clear_transient_state(self) -> None:
+        """Cancel dashboard work so a new scenario cannot inherit old results."""
+
+        async with self._refresh_lock:
+            tasks = [task for task in (self._refresh_task, self._canonical_task) if task and not task.done()]
+            for task in tasks:
+                task.cancel()
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+            self._refresh_task = None
+            self._canonical_task = None
+            self._refresh = RefreshView()
+            self._last_refresh_news_status = None
+
     @staticmethod
     def _source_label(source: str, is_live: bool) -> str:
         if source == "simulated":
-            return "Simulated Portfolio"
+            return "Demo portfolio"
+            return "Demo portfolio · Simulated market data"
         return "Live Portfolio" if is_live else "Portfolio"
 
     async def _portfolio(self, financial_day: FinancialDayState | None = None) -> PortfolioSummary:
         if financial_day and financial_day.run_mode == "presentation":
             minute = presentation_minute(financial_day) or 7 * 60
             checkpoint = "07:00"
-            for candidate in ("09:15", "12:17", "15:30", "20:00", "21:00"):
+            for candidate in ("08:00", "12:17", "15:30", "20:00", "21:00"):
                 hour, value = (int(part) for part in candidate.split(":"))
                 if hour * 60 + value <= minute:
                     checkpoint = candidate
@@ -202,7 +227,7 @@ class DashboardService:
             else None
         )
         holdings = []
-        for holding in portfolio.holdings[:4]:
+        for holding in portfolio.holdings:
             move = None
             if holding.previous_close:
                 move = round(
@@ -212,7 +237,14 @@ class DashboardService:
             holdings.append(
                 HoldingView(
                     symbol=holding.symbol,
+                    name=holding.name,
+                    asset_class=holding.asset_class,
+                    quantity=float(holding.quantity),
+                    average_price=float(holding.average_price),
+                    current_price=float(holding.current_price),
                     market_value=float(holding.market_value),
+                    unrealized_pnl=float(holding.unrealized_pnl),
+                    day_pnl=float(holding.day_pnl) if holding.day_pnl is not None else None,
                     portfolio_weight=float(holding.portfolio_weight),
                     day_change_pct=move,
                 )
@@ -232,6 +264,10 @@ class DashboardService:
             unrealized_pnl=float(portfolio.unrealized_pnl),
             day_pnl=float(portfolio.day_pnl) if portfolio.day_pnl is not None else None,
             day_change_pct=day_change_pct,
+            overall_return_pct=float(portfolio.overall_return_pct) if portfolio.overall_return_pct is not None else None,
+            equity_exposure_pct=float(portfolio.equity_exposure_pct) if portfolio.equity_exposure_pct is not None else None,
+            defensive_exposure_pct=float(portfolio.defensive_exposure_pct) if portfolio.defensive_exposure_pct is not None else None,
+            risk_profile=portfolio.risk_profile,
             holdings_count=len(portfolio.holdings),
             largest_holdings=holdings,
             sector_exposure=[
@@ -240,6 +276,23 @@ class DashboardService:
                     portfolio_weight=float(item.portfolio_weight),
                 )
                 for item in portfolio.sector_exposure
+            ],
+            asset_allocation=[
+                AllocationView(
+                    label=item.label,
+                    portfolio_weight=float(item.portfolio_weight),
+                    market_value=float(item.market_value),
+                )
+                for item in portfolio.asset_allocation
+            ],
+            performance=[
+                PerformanceView(
+                    period=item.period,
+                    portfolio_return_pct=float(item.portfolio_return_pct),
+                    benchmark_return_pct=float(item.benchmark_return_pct) if item.benchmark_return_pct is not None else None,
+                    benchmark_label=item.benchmark_label,
+                )
+                for item in portfolio.performance
             ],
         )
 
@@ -286,6 +339,18 @@ class DashboardService:
                     details={"checkpoint": "12:17"},
                 )],
             )
+        if financial_day.run_mode == "real":
+            retained = [
+                item
+                for item in financial_day.events_detected
+                if item.run_id == financial_day.run_id
+            ]
+            return (
+                max(retained, key=lambda item: item.evaluated_at)
+                if retained
+                else None
+            )
+
         event = simulation_service.get_market_event()
         if event is None:
             snapshot = simulation_service.snapshot()
@@ -342,12 +407,14 @@ class DashboardService:
             self._brief(portfolio, financial_day),
             self._event(portfolio, financial_day),
         )
-        day = daily_event_store.get_day(important_event.event.timestamp.date())
-        today_events = [
-            item.assessment
-            for item in day.events
-            if item.assessment.run_id == financial_day.run_id
-        ]
+        today_events = list(financial_day.events_detected)
+        if important_event is not None:
+            day = daily_event_store.get_day(important_event.event.timestamp.date())
+            today_events = [
+                item.assessment
+                for item in day.events
+                if item.assessment.run_id == financial_day.run_id
+            ] or today_events
         trace_labels = {
             "EVENT_DETECTED": "Unusual event detected",
             "PORTFOLIO_CHECK": "Portfolio exposure checked",
@@ -362,17 +429,21 @@ class DashboardService:
                 status="attention" if step.stage == "DECISION" else "complete",
                 detail=step.outcome,
             )
-            for step in important_event.trace
+            for step in (important_event.trace if important_event else [])
         ]
         high_relevance = sum(story.relevance_score >= 85 for story in brief.stories)
-        attention_count = min(3, high_relevance + (1 if important_event.notification_required else 0))
+        attention_count = min(
+            3,
+            high_relevance
+            + (1 if important_event and important_event.notification_required else 0),
+        )
         attention_summary = build_attention_summary(
             financial_day,
             [story.id for story in brief.stories],
             attention_count,
         )
         attention_label = "thing" if attention_count == 1 else "things"
-        hour = datetime.now().hour
+        hour = application_now().hour
         greeting = "Good morning" if hour < 12 else "Good afternoon" if hour < 17 else "Good evening"
         return DashboardResponse(
             day_id=financial_day.day_id,
@@ -381,7 +452,7 @@ class DashboardService:
             greeting=greeting,
             attention_count=attention_count,
             attention_summary=attention_summary,
-            attention_message=f"{attention_count} {attention_label} deserve your attention today",
+            attention_message=attention_message_for_count(attention_count),
             portfolio=self._portfolio_view(portfolio),
             daily_brief=brief,
             important_event=important_event,
@@ -431,10 +502,10 @@ class DashboardService:
                     sub_agents=[create_market_agent()],
                 )
                 runner = InMemoryRunner(
-                    agent=refresh_agent, app_name="dashboard_refresh"
+                    agent=refresh_agent, app_name="agents"
                 )
                 await runner.session_service.create_session(
-                    app_name="dashboard_refresh", user_id="dashboard", session_id=session_id
+                    app_name="agents", user_id="dashboard", session_id=session_id
                 )
                 async for _ in runner.run_async(
                     user_id="dashboard",
@@ -445,7 +516,7 @@ class DashboardService:
                 ):
                     pass
                 session = await runner.session_service.get_session(
-                    app_name="dashboard_refresh", user_id="dashboard", session_id=session_id
+                    app_name="agents", user_id="dashboard", session_id=session_id
                 )
                 metadata = (
                     json.loads(session.state[NEWS_METADATA_KEY]) if session else {}
@@ -466,6 +537,7 @@ class DashboardService:
                 ),
             )
         except Exception:
+            logger.exception("Dashboard market refresh failed: %s", refresh_id)
             self._last_refresh_news_status = FreshnessStatus.STALE
             news_candidate_cache.finish_failed_refresh()
             self._refresh = RefreshView(

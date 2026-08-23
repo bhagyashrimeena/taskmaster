@@ -1,0 +1,51 @@
+flowchart LR
+    subgraph client ["Client"]
+        web["Next.js Wealth Copilot"]
+    end
+
+    subgraph gateway ["API Gateway"]
+        api["FastAPI REST and media API"]
+    end
+
+    subgraph service ["Core Runtime"]
+        day["Checkpoint Scheduler and Day Orchestrator"]
+        taskmaster["ADK TaskMaster"]
+        agents["Portfolio, Market, Research, and Media Agents"]
+        decisions["Relevance and Event Decision Engines"]
+        interaction["Interaction and Advisor Handoff"]
+    end
+
+    subgraph datastore ["State and Artifacts"]
+        financialDay["Financial Day and Event State"]
+        conversations["Conversations and Research Jobs"]
+        mediaStore["Stories and Gemini Audio"]
+    end
+
+    subgraph external ["External Providers"]
+        portfolioSource["Portfolio Provider: simulated active, Zerodha optional"]
+        vertex["Vertex AI Gemini via ADC"]
+        search["Google Search Grounding"]
+        advisor["Human Advisor"]
+    end
+
+    subgraph async ["Asynchronous Triggers"]
+        checkpoints["Checkpoint Schedule"]
+    end
+
+    web -->|"HTTPS and audio"| api
+    api -->|"Runs checkpoints"| day
+    api -->|"Routes requests"| taskmaster
+    api -->|"Handles actions"| interaction
+    checkpoints -.->|"Triggers"| day
+    day -->|"Coordinates"| taskmaster
+    day -->|"Applies rules"| decisions
+    day -->|"Writes continuity"| financialDay
+    taskmaster -->|"Delegates"| agents
+    agents -->|"Supplies signals"| decisions
+    agents -->|"Stores media"| mediaStore
+    decisions -->|"Records outcomes"| financialDay
+    interaction -->|"Stores context"| conversations
+    agents -.->|"Portfolio data"| portfolioSource
+    agents -.->|"Gemini reasoning"| vertex
+    agents -.->|"Grounded research"| search
+    interaction -.->|"Sends handoff"| advisor

@@ -20,10 +20,10 @@ Phase 9 integrated the existing P8.6 presentation clock, P8.7 persistent Copilot
 | Retained/analyzed stories | 14 |
 | High-priority signals | 2 |
 | Automated checkpoints | 7 |
-| Event Watcher golden-path score | 94.21 relevance |
-| HDFC direct exposure | 18.01% |
+| Event Watcher golden-path score | 93.11 relevance |
+| HDFC direct exposure | 17.21% |
 | Presentation event decision | ALERT |
-| Backend tests | 88 passed |
+| Backend tests | 133 passed |
 | Copilot browser console errors | 0 |
 | Presentation/simulation browser console errors | 0 |
 
@@ -55,7 +55,7 @@ Passed:
 - Presentation clock play/advance golden path
 - Automatic 12:17 HDFC alert
 - HDFC decision `ALERT`
-- HDFC exposure `18.01%`
+- HDFC exposure `17.21%`
 - Quiet-day scenario decision `IGNORE`
 - Presentation controls hidden in normal mode
 - Zero browser console errors in the focused Phase 8.7, presentation, and simulation checks

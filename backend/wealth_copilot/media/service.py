@@ -4,7 +4,9 @@ import asyncio
 from datetime import datetime, timezone
 import hashlib
 import json
+import logging
 from pathlib import Path
+import re
 from threading import RLock
 from typing import Protocol
 import wave
@@ -12,7 +14,7 @@ from io import BytesIO
 
 from ..config import get_settings
 from ..interaction.memory import daily_interaction_store
-from .provider import gemini_tts_provider
+from .provider import GeminiTtsConfigurationError, gemini_tts_provider
 from .schemas import (
     AudioBrief,
     AudioBriefType,
@@ -24,6 +26,8 @@ from ..day.active import ArtifactProvenance
 
 
 settings = get_settings()
+logger = logging.getLogger(__name__)
+_SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$")
 
 
 class AudioProvider(Protocol):
@@ -45,6 +49,8 @@ class MediaService:
         self._tasks: dict[str, asyncio.Task] = {}
 
     def _paths(self, brief_id: str) -> tuple[Path, Path]:
+        if not _SAFE_ID.fullmatch(brief_id) or brief_id in {".", ".."}:
+            raise ValueError("Invalid audio brief identifier")
         return (
             self._cache_dir / f"{brief_id}.json",
             self._cache_dir / f"{brief_id}.wav",
@@ -52,7 +58,9 @@ class MediaService:
 
     def _persist_metadata(self, brief: AudioBrief) -> None:
         metadata_path, _ = self._paths(brief.brief_id)
-        metadata_path.write_text(brief.model_dump_json(indent=2), encoding="utf-8")
+        temporary = metadata_path.with_suffix(".json.tmp")
+        temporary.write_text(brief.model_dump_json(indent=2), encoding="utf-8")
+        temporary.replace(metadata_path)
 
     def _load_cached(self, brief_id: str) -> AudioBrief | None:
         metadata_path, audio_path = self._paths(brief_id)
@@ -196,6 +204,20 @@ class MediaService:
                 brief=current.model_copy(deep=True), accepted=True
             )
 
+    async def clear(self) -> None:
+        """Cancel in-flight synthesis and discard the process-local index."""
+
+        with self._lock:
+            tasks = list(self._tasks.values())
+            self._tasks.clear()
+            self._briefs.clear()
+            self._latest.clear()
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
     async def _generate(self, brief_id: str) -> None:
         with self._lock:
             brief = self._briefs[brief_id]
@@ -221,16 +243,23 @@ class MediaService:
                 brief.cached = True
                 brief.message = "Audio brief is ready."
                 self._persist_metadata(brief)
-        except Exception:
+        except Exception as exc:
+            logger.exception("Audio synthesis failed for %s", brief_id)
             with self._lock:
                 brief = self._briefs[brief_id]
                 brief.status = AudioStatus.FALLBACK
                 brief.audio_url = None
                 brief.cached = False
-                brief.message = "Audio is temporarily unavailable. The complete text brief remains ready."
+                brief.message = (
+                    "Gemini TTS is not configured. Add GEMINI_API_KEY or configure Vertex AI, then retry."
+                    if isinstance(exc, GeminiTtsConfigurationError)
+                    else "Gemini TTS could not generate this audio. Check the backend logs, then retry."
+                )
                 self._persist_metadata(brief)
 
     def get(self, brief_id: str) -> AudioBrief | None:
+        if not _SAFE_ID.fullmatch(brief_id) or brief_id in {".", ".."}:
+            return None
         with self._lock:
             brief = self._briefs.get(brief_id) or self._load_cached(brief_id)
             if brief:

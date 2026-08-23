@@ -1,8 +1,10 @@
 """Environment-backed application configuration."""
 
 from functools import lru_cache
+from datetime import date, datetime
 from pathlib import Path
 from typing import Literal
+from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 from pydantic import Field, field_validator
@@ -24,6 +26,7 @@ class Settings(BaseSettings):
     )
 
     portfolio_provider: Literal["simulated", "zerodha"] = "simulated"
+    market_data_provider: Literal["demo"] = "demo"
     news_provider: Literal["simulated", "google_search"] = "google_search"
     simulation_mode: Literal["normal", "judge"] = "normal"
     simulation_scenario_id: str = "hdfc-company-shock"
@@ -41,8 +44,9 @@ class Settings(BaseSettings):
     tts_language_code: str = "en-IN"
     audio_cache_dir: str = str(_BACKEND_DIR / ".cache" / "audio")
     day_state_dir: str = str(_BACKEND_DIR / ".cache" / "days")
-    day_schedule_mode: Literal["disabled", "real", "demo"] = "disabled"
+    day_schedule_mode: Literal["disabled", "real", "demo"] = "real"
     day_schedule_timezone: str = "Asia/Kolkata"
+    market_watch_interval_minutes: int = Field(default=15, ge=5, le=60)
     demo_day_duration_seconds: int = Field(default=72, ge=60, le=90)
     demo_step_timeout_seconds: float = Field(default=45, ge=5, le=120)
     advisor_provider: Literal["demo", "gmail"] = "demo"
@@ -53,10 +57,26 @@ class Settings(BaseSettings):
     advisor_demo_reply_delay_seconds: float = Field(default=5, ge=0, le=60)
     advisor_send_timeout_seconds: float = Field(default=15, gt=0, le=60)
     log_level: str = "INFO"
+    gemini_api_key: str | None = None
     google_api_key: str | None = None
+    google_genai_use_vertexai: bool = False
     google_genai_use_enterprise: bool = False
     google_cloud_project: str | None = None
     google_cloud_location: str = "global"
+    livekit_url: str | None = None
+    livekit_api_key: str | None = None
+    livekit_api_secret: str | None = None
+    livekit_agent_name: str = "wealth-copilot"
+    livekit_stt_model: str = "deepgram/nova-3"
+    livekit_stt_language: str = "en-IN"
+    livekit_tts_model: str = "inworld/inworld-tts-2"
+    livekit_tts_voice: str = "Ashley"
+
+    @property
+    def vertex_ai_enabled(self) -> bool:
+        """Normalize the canonical Vertex flag and the SDK compatibility alias."""
+
+        return self.google_genai_use_vertexai or self.google_genai_use_enterprise
 
     @field_validator("portfolio_provider", mode="before")
     @classmethod
@@ -72,6 +92,14 @@ class Settings(BaseSettings):
         if isinstance(value, str):
             normalized = value.strip().lower()
             return "simulated" if normalized == "demo" else normalized
+        return value
+
+    @field_validator("market_data_provider", mode="before")
+    @classmethod
+    def normalize_market_data_provider(cls, value: object) -> object:
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            return "demo" if normalized == "simulated" else normalized
         return value
 
     @field_validator("simulation_mode", mode="before")
@@ -93,3 +121,21 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+
+
+def application_now() -> datetime:
+    """Return the application clock in the configured financial timezone."""
+
+    settings = get_settings()
+    return datetime.now(ZoneInfo(settings.day_schedule_timezone))
+
+
+def application_today() -> date:
+    """Key normal financial-day state from the configured wall clock.
+
+    Demo scenarios may contain historical market timestamps, but they do not
+    own the normal product clock. Explicit demo/presentation operations pass
+    their selected trading date through the orchestrator.
+    """
+
+    return application_now().date()

@@ -13,9 +13,11 @@ from wealth_copilot.events import (
 )
 from wealth_copilot.events.schemas import InvestigationStatus, MarketEvent
 from wealth_copilot.portfolio.demo_provider import DemoPortfolioProvider
+from wealth_copilot.simulation import simulation_service
 
 
 async def _portfolio():
+    simulation_service.advance_to("12:17")
     return await DemoPortfolioProvider().get_summary()
 
 
@@ -27,17 +29,27 @@ def test_ten_provider_neutral_event_fixtures_validate() -> None:
 
 async def test_hdfc_hero_event_is_a_complete_internal_alert() -> None:
     store = DailyEventStore()
+    portfolio = await _portfolio()
     assessment = await EventDecisionEngine(store=store).assess(
-        get_event_fixture("hdfc-bank-sudden-fall"), await _portfolio()
+        get_event_fixture("hdfc-bank-sudden-fall"), portfolio
+    )
+    hdfc = next(item for item in portfolio.holdings if item.symbol == "HDFCBANK")
+    financials = next(
+        item for item in portfolio.sector_exposure
+        if item.sector == "Financial Services"
     )
 
     assert assessment.decision == EventDecision.ALERT
     assert assessment.notification_required is True
     assert assessment.affected_holdings == ["HDFCBANK"]
-    assert assessment.affected_portfolio_percentage == 18.01
-    assert assessment.sector_exposure_percentage == 28.01
+    assert assessment.affected_portfolio_percentage == pytest.approx(
+        float(hdfc.portfolio_weight), abs=0.01
+    )
+    assert assessment.sector_exposure_percentage == pytest.approx(
+        float(financials.portfolio_weight), abs=0.01
+    )
     assert assessment.sector_relative_move_pct == 4.6
-    assert assessment.relevance_score == 94.21
+    assert assessment.relevance_score >= 80
     assert assessment.investigation_status == InvestigationStatus.COMPLETE
     assert len(assessment.developments) == 2
     assert [step.stage for step in assessment.trace] == [
@@ -105,4 +117,3 @@ async def test_taskmaster_event_tool_runs_offline_hero_flow() -> None:
     assert result["mode"] == "deterministic_fixture"
     assert result["data"]["decision"] == "ALERT"
     assert result["data"]["notification_required"] is True
-

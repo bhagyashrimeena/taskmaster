@@ -9,6 +9,7 @@ from wealth_copilot.day.orchestrator import DayOrchestrator
 from wealth_copilot.day.store import FinancialDayStore
 from wealth_copilot.events import EventDecisionEngine
 from wealth_copilot.events.schemas import EventDecision
+from wealth_copilot.interaction.memory import conversation_store, daily_interaction_store
 from wealth_copilot.portfolio.simulated_provider import SimulatedPortfolioProvider
 from wealth_copilot.simulation import simulation_service
 from wealth_copilot.media.provider import pcm_to_wav
@@ -22,7 +23,7 @@ from wealth_copilot.story.schemas import StoryNarrationStatus
 async def test_scenario_controller_changes_prices_and_provenance() -> None:
     provider = SimulatedPortfolioProvider()
     simulation_service.load_scenario("hdfc-company-shock")
-    simulation_service.advance_to("09:15")
+    simulation_service.advance_to("08:00")
     opening = await provider.get_summary()
 
     state = simulation_service.advance_to("12:17")
@@ -35,6 +36,15 @@ async def test_scenario_controller_changes_prices_and_provenance() -> None:
     assert event.portfolio_value < opening.portfolio_value
     hdfc = next(item for item in event.holdings if item.symbol == "HDFCBANK")
     assert round(float(hdfc.day_pnl / (hdfc.quantity * hdfc.previous_close) * 100), 1) == -5.4
+
+
+async def test_portfolio_health_uses_the_canonical_0800_snapshot(tmp_path: Path) -> None:
+    store = FinancialDayStore(tmp_path / "health-days")
+    state = await DayOrchestrator(store).run_portfolio_health(date(2026, 8, 18))
+
+    assert simulation_service.state().checkpoint == "08:00"
+    assert simulation_service.snapshot().as_of.isoformat() == "2026-08-18T08:00:00+05:30"
+    assert state.portfolio_health is not None
 
 
 async def test_all_scenario_decisions_are_repeatable() -> None:
@@ -80,6 +90,17 @@ def test_simulation_api_load_advance_reset_and_errors() -> None:
     assert reset.status_code == 200
     assert reset.json()["checkpoint"] == "07:00"
     assert client.post("/api/v1/simulation/scenarios/not-real").status_code == 404
+
+
+def test_simulation_api_clears_cross_surface_transient_state() -> None:
+    conversation_store.append("old-conversation", "user", "old context")
+    daily_interaction_store.save_story("hdfc-rbi")
+
+    response = TestClient(app).post("/api/v1/simulation/scenarios/quiet-market-day")
+
+    assert response.status_code == 200
+    assert conversation_store.get("old-conversation").history == []
+    assert daily_interaction_store.get().saved_story_ids == []
 
 
 async def test_each_financial_day_replay_gets_one_consistent_run_id(tmp_path: Path) -> None:

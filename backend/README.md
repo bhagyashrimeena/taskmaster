@@ -24,13 +24,60 @@ For Agent Platform calls, authenticate with Application Default Credentials:
 gcloud init
 gcloud config set project YOUR_GOOGLE_CLOUD_PROJECT
 gcloud auth application-default login
+gcloud auth application-default set-quota-project YOUR_GOOGLE_CLOUD_PROJECT
 ```
+
+Use one Vertex AI authentication path for TaskMaster, specialist agents,
+Google Search grounding, and Gemini TTS:
+
+```env
+GOOGLE_GENAI_USE_VERTEXAI=True
+GOOGLE_GENAI_USE_ENTERPRISE=True
+GOOGLE_CLOUD_PROJECT=YOUR_GOOGLE_CLOUD_PROJECT
+GOOGLE_CLOUD_LOCATION=global
+GEMINI_API_KEY=
+GOOGLE_API_KEY=
+```
+
+`GOOGLE_GENAI_USE_ENTERPRISE` is retained as a compatibility alias. Application
+code normalizes either flag into one Vertex-enabled setting. API keys remain an
+optional Developer API fallback and are not required when Vertex AI and ADC are
+configured. `GET /api/v1/readiness` reports the project and configuration state
+without returning credentials. It does not make a billable model call.
 
 Run the API and ADK agent from `backend/`:
 
 ```powershell
 uvicorn wealth_copilot.api:app --host 127.0.0.1 --port 8001
 adk run wealth_copilot
+```
+
+## LiveKit voice worker
+
+Create a LiveKit Cloud project and add these server-only values to `.env`:
+
+```env
+LIVEKIT_URL=wss://YOUR_PROJECT.livekit.cloud
+LIVEKIT_API_KEY=YOUR_LIVEKIT_API_KEY
+LIVEKIT_API_SECRET=YOUR_LIVEKIT_API_SECRET
+LIVEKIT_AGENT_NAME=wealth-copilot
+```
+
+The default STT and TTS use LiveKit Inference, so they need no separate provider keys. Start the explicitly dispatched worker in development or production mode:
+
+```powershell
+python -m wealth_copilot.voice.agent dev
+# production:
+python -m wealth_copilot.voice.agent start
+```
+
+The browser requests `/api/v1/copilot/voice/session`, joins the short-lived room, and waits for the worker before showing an active call. The worker transcribes speech, delegates each finalized turn to the canonical TaskMaster-backed `InteractionService`, and synthesizes that returned answer. It does not contain an independent financial LLM path. `record=False` disables LiveKit session recording; the existing Copilot conversation memory retains the text turns.
+
+Run a credential-free two-turn TaskMaster adapter check with:
+
+```powershell
+$env:PYTHONPATH='.'
+python scripts/livekit_voice_conversation_smoke.py
 ```
 
 Run the dashboard from `frontend/`:
@@ -76,7 +123,7 @@ Financial Day advances the active scenario through fixed checkpoints:
 
 ```text
 07:00 Morning Pulse
-09:15 Portfolio Health
+08:00 Portfolio Health
 12:17 Market Event
 15:30 Market Close
 20:00 Evening Wealth Wrap
@@ -137,7 +184,7 @@ Search-grounded market intelligence. Every successful live candidate batch is
 atomically persisted at `.cache/market/latest.json`; a restart can therefore
 render real headlines, publisher names, and clickable source URLs immediately
 without waiting for another Search request. Scenario news remains available for
-the controlled presentation path only.
+controlled financial-day runs only.
 
 Every financial-day replay receives a new `run_id` beneath a stable `day_id`.
 Dashboard briefs, Event Watcher assessments, advisor exchanges, audio briefs,
@@ -146,8 +193,18 @@ visible day, which prevents an event from one run being shown beside a timeline
 or recap from another.
 
 Freshness internals remain in telemetry, while the product uses simple
-`Updated` and `Last updated` language. The accelerated replay control is hidden
-from normal users and is available only at `/?presentation=true`.
+`Updated` and `Last updated` language. The accelerated financial-day controls
+live on the product Timeline and delegate every checkpoint to the same
+`DayOrchestrator`.
+
+## Runtime boundary
+
+The current hackathon runtime is intentionally single-user and process-local:
+the simulated portfolio, financial-day clock, conversation context, background
+jobs, and interaction state are shared by the running API process. Do not expose
+the API directly to multiple users or the public internet without adding
+authentication, user-scoped persistence, and authorization around simulation,
+advisor-send, and other mutation endpoints.
 
 Daily Wealth Story narration is generated as one WAV per scene. Each scene
 records its measured duration plus a short breathing interval, and the React

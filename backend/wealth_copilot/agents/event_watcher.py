@@ -5,6 +5,8 @@ from datetime import date
 from ..events import EventDecisionEngine, daily_event_store, get_event_fixture
 from .portfolio_agent import get_portfolio_summary
 from ..portfolio.schemas import PortfolioSummary
+from ..config import get_settings
+from ..simulation import simulation_service
 
 
 event_decision_engine = EventDecisionEngine(store=daily_event_store)
@@ -17,6 +19,13 @@ async def run_event_watcher(
 
     try:
         event = get_event_fixture(event_id)
+        if get_settings().portfolio_provider == "simulated":
+            event_checkpoint = event.timestamp.strftime("%H:%M")
+            available = {
+                snapshot.checkpoint for snapshot in simulation_service.scenario().snapshots
+            }
+            if event_checkpoint in available:
+                simulation_service.advance_to(event_checkpoint)
         portfolio_result = await get_portfolio_summary()
         if portfolio_result.get("status") != "ok":
             return {

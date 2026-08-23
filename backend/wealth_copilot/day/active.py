@@ -1,6 +1,7 @@
 """Canonical active financial-day identity and derived attention state."""
 
 from datetime import datetime
+from enum import StrEnum
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -24,6 +25,35 @@ class AttentionSummary(BaseModel):
     active_event_count: int = Field(ge=0)
     story_ids: list[str] = Field(default_factory=list)
     event_ids: list[str] = Field(default_factory=list)
+
+
+class AttentionDisposition(StrEnum):
+    INTERRUPTED = "interrupted"
+    DEFERRED = "deferred"
+    MONITORED = "monitored"
+    IGNORED = "ignored"
+
+
+class AttentionBudget(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    interrupt_limit: int = Field(default=3, ge=1)
+    signals_processed: int = Field(default=0, ge=0)
+    interrupted: int = Field(default=0, ge=0)
+    deferred: int = Field(default=0, ge=0)
+    monitored: int = Field(default=0, ge=0)
+    ignored: int = Field(default=0, ge=0)
+
+    def record(self, disposition: AttentionDisposition) -> None:
+        self.signals_processed += 1
+        if disposition == AttentionDisposition.INTERRUPTED:
+            self.interrupted += 1
+        elif disposition == AttentionDisposition.DEFERRED:
+            self.deferred += 1
+        elif disposition == AttentionDisposition.MONITORED:
+            self.monitored += 1
+        else:
+            self.ignored += 1
 
 
 class ActiveFinancialDay(BaseModel):

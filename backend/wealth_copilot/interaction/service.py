@@ -2,6 +2,7 @@
 
 import asyncio
 from datetime import datetime, timezone
+import logging
 import re
 from typing import Awaitable, Callable
 from urllib.parse import urlsplit
@@ -24,6 +25,7 @@ from .schemas import (
 
 
 settings = get_settings()
+logger = logging.getLogger(__name__)
 _URL = re.compile(r"https?://[^\s)\]>]+")
 _UNSAFE_SENTENCE = re.compile(
     r"[^.!?]*(?:\byou should (?:buy|sell|hold)\b|\bbuy the dip\b|\bincrease your sip\b|\bthis (?:stock|security) will recover\b)[^.!?]*[.!?]?",
@@ -150,7 +152,7 @@ class InteractionService:
     @staticmethod
     async def _invoke_taskmaster(prompt: str, timeout_seconds: float) -> tuple[str, list[str]]:
         session_id = uuid4().hex
-        app_name = "wealth_copilot_interaction"
+        app_name = "agents"
         runner = InMemoryRunner(agent=root_agent, app_name=app_name)
         trace: list[str] = ["TaskMaster started"]
         answer = ""
@@ -201,6 +203,12 @@ class InteractionService:
         history_text = "\n".join(f"{role}: {text}" for role, text in history) or "None"
         if request.mode == InteractionMode.RESEARCH:
             mode_rule = "You MUST delegate to research_agent exactly once. Return source-first research with exact URLs."
+        elif request.mode in {InteractionMode.VOICE, InteractionMode.CALL}:
+            mode_rule = (
+                "Use supplied retained context first. Do not call research_agent or refresh/search tools. "
+                "Answer for speech in at most 100 words, lead with the direct answer, and use short sentences. "
+                "Do not say 'dashboard data', 'system state', 'retained context', or expose internal routing."
+            )
         elif request.mode == InteractionMode.EXPLAIN:
             mode_rule = (
                 "Use only the supplied retained context. Do not call research_agent or refresh/search tools. "
@@ -235,6 +243,7 @@ class InteractionService:
             answer, trace = invocation[0], invocation[1]
             grounding_metadata = invocation[2] if len(invocation) > 2 else None
         except Exception as exc:
+            logger.exception("TaskMaster interaction failed")
             fallback = True
             answer = _fallback_answer(context, request.mode)
             trace = [

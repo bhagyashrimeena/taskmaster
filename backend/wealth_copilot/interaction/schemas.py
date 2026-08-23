@@ -13,6 +13,9 @@ class InteractionModel(BaseModel):
 class InteractionMode(StrEnum):
     EXPLAIN = "explain"
     CHAT = "chat"
+    TEXT = "text"
+    VOICE = "voice"
+    CALL = "call"
     RESEARCH = "research"
 
 
@@ -42,6 +45,8 @@ class SurfaceContext(InteractionModel):
     target_type: str
     target_id: str | None = None
     title: str
+    portfolio_as_of: datetime
+    source_checkpoint: str
     facts: list[str]
     interpretation: list[str]
     unknowns: list[str]
@@ -114,4 +119,3 @@ class DailyInteractionView(InteractionModel):
     saved_story_ids: list[str] = Field(default_factory=list)
     saved_event_ids: list[str] = Field(default_factory=list)
     feedback: dict[str, str] = Field(default_factory=dict)
-

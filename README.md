@@ -4,7 +4,7 @@
 
 Wealth Copilot is a portfolio-aware financial intelligence assistant. V1 turns portfolio and market context into a personalized daily brief, deterministic event alerts, explanations, research handoffs, audio briefs, a financial-day timeline, an optional advisor handoff, and a Daily Wealth Story. It prioritizes information and uncertainty; it does not provide investment instructions or place trades.
 
-The portfolio and controlled presentation scenarios are simulated. Market news can use Google Search grounding when configured.
+The portfolio and controlled financial-day scenarios are simulated. Market news can use Google Search grounding when configured.
 
 ## Architecture
 
@@ -16,13 +16,13 @@ The portfolio and controlled presentation scenarios are simulated. Market news c
 - **RelevanceEngine:** deterministic exposure, sector, materiality, freshness, and movement scoring.
 - **EventDecisionEngine / Event Watcher:** deterministic trigger, investigation, relevance, and `IGNORE` / `MONITOR` / `INVESTIGATE` / `ALERT` decisions.
 - **FinancialDayState / DayOrchestrator:** durable day identity, checkpoints, artifacts, event continuity, advisor state, and story state.
-- **Presentation mode:** accelerated simulated time from 07:00 through 21:01, with controlled scenario checkpoints and a new run on restart.
+- **Financial-day clock:** accelerated product controls run all 13 scheduled checkpoints from 07:00 through 21:01, with a new run on restart.
 
 ## Tech stack
 
 - Python 3.10+; FastAPI; Pydantic Settings; Uvicorn
 - Google ADK 2.5.0; Gemini/Vertex AI; Google Search grounding
-- Next.js 16.3.1; React 19; TypeScript 5.9; ESLint 9; Lucide React
+- Next.js 16.3.1; React 19; TypeScript 5.9; Tailwind CSS 4; TanStack Query; Zustand; Recharts; Motion; Radix; Lucide React; LiveKit client
 - Pytest and pytest-asyncio; Playwright Core browser smoke scripts
 
 ## Repository structure
@@ -81,8 +81,8 @@ npm run dev -- --port 3001
 
 URLs:
 
-- Dashboard: http://127.0.0.1:3001/
-- simulated clock Presentation mode: http://127.0.0.1:3001/?presentation=true
+- Product Today view: http://127.0.0.1:3001/
+- Portfolio / Copilot / Alerts / Timeline: `/portfolio`, `/copilot`, `/alerts`, `/timeline`
 - API health: http://127.0.0.1:8001/health
 - API documentation: http://127.0.0.1:8001/docs
 
@@ -96,21 +96,44 @@ gcloud auth application-default login
 
 Set `GOOGLE_GENAI_USE_ENTERPRISE=TRUE`, `GOOGLE_CLOUD_PROJECT`, and `GOOGLE_CLOUD_LOCATION` in `backend/.env`. Enable the required Google Cloud services and grant the authenticated principal Gemini/Vertex AI access. Google Search grounding requires a supported ADK/Gemini configuration and network access. `GOOGLE_API_KEY` is an optional alternative for Gemini Developer API mode; never commit its value.
 
-## Normal mode vs presentation mode
+## Financial-day controls
 
-Normal mode opens the cached-first dashboard and hides accelerated day controls. Presentation mode uses `/?presentation=true` and exposes:
+Timeline is the single day-running surface. **Start the day**, **Pause the day**, and **Resume the day** preserve completed work. **Restart the day** requires confirmation, resets the simulated run to 07:00, and starts it immediately. The clock executes every product checkpoint in scheduled order:
 
 ```text
 07:00 Morning Pulse
 08:00 Portfolio Health
-12:17 controlled market event
+09:15 Market Open Monitor
+10:00 Adaptive Market Watch
+11:30 Sector Deep Dive
+12:17 Event Investigations
+13:00 Learn From Your Portfolio
 15:30 Market Close
+17:00 Portfolio Intelligence
+18:30 Action Queue
 20:00 Evening Wrap
 21:00 Tomorrow Prep
 21:01 Daily Wealth Story
 ```
 
-Restarting presentation creates a new run and clears derived day artifacts. Presentation time is simulated time, not wall-clock time.
+Qualifying events continue through the deterministic decision engine. A new alert updates the product queries and appears as a dismissible in-app notification; no browser-notification permission is requested.
+
+## Copilot voice and calls
+
+Browser speech recognition can transcribe into the persistent composer for review before sending through the same `/api/v1/copilot` TaskMaster path. Text remains available when speech recognition or microphone permission is unavailable.
+
+Live calls are config-gated. Set `LIVEKIT_URL`, `LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET` in `backend/.env`; the API secret is used only on the server to mint a 15-minute participant token. `LIVEKIT_AGENT_NAME` defaults to `wealth-copilot`.
+
+Run the voice worker alongside the API:
+
+```powershell
+Set-Location backend
+..\.venv\Scripts\python.exe -m wealth_copilot.voice.agent dev
+```
+
+The worker uses LiveKit Inference for `LIVEKIT_STT_MODEL`/`LIVEKIT_TTS_MODEL`, then sends each finalized transcript through the existing `InteractionService` in `call` mode. A non-callable SDK sentinel makes any accidental direct LLM bypass fail. Final LiveKit transcriptions are appended to the same persisted browser conversation. Without the three LiveKit credentials, the control remains visible but disabled; with credentials but no reachable worker, the UI times out safely and keeps text chat available.
+
+No separate Deepgram, Inworld, or OpenAI key is required when using the default LiveKit Inference models. TaskMaster still requires the existing Google Vertex ADC or Gemini configuration.
 
 ## Simulated vs live data
 
@@ -134,10 +157,11 @@ npm run build
 With both servers running, browser smoke tests include:
 
 ```powershell
-node scripts/normal-product-browser-smoke.mjs
-node scripts/phase87-copilot-browser-smoke.mjs
-node scripts/presentation-clock-browser-smoke.mjs
-node scripts/phase9-temporal-browser-smoke.mjs
+npm run test:e2e:mobile
+npm run test:e2e:copilot
+npm run test:e2e:copilot-ux
+npm run test:e2e
+npm run test:e2e:polish
 ```
 
 ## Known limitations
@@ -146,6 +170,7 @@ node scripts/phase9-temporal-browser-smoke.mjs
 - Zerodha is optional read-only integration and not the default path.
 - Google Search, Gemini, TTS, and Gmail advisor behavior depend on external credentials, quotas, and network access.
 - Audio falls back to a complete text transcript when TTS is unavailable.
+- LiveKit credentials and a running/deployed `wealth-copilot` voice worker are required for realtime calls; the browser UI and voice worker do not create a second financial reasoning path.
 - Some publisher source links may not have durable URLs.
 - The demo advisor provider simulates review, send, and reply behavior.
 

@@ -1,4 +1,4 @@
-import type { AdvisorCase, AdvisorProfile, AudioBrief, AudioBriefType, AudioGenerationResponse, ConversationInput, ConversationResponse, DailyWealthStory, DashboardData, FinancialDayState, PresentationClockState, ResearchJob, StoryNarration } from "./types";
+import type { AdvisorCase, AdvisorProfile, AudioBrief, AudioBriefType, AudioGenerationResponse, ConversationInput, ConversationResponse, DailyWealthStory, DashboardData, FinancialDayState, ResearchJob, StoryNarration } from "./types";
 
 const base = "/api/backend/v1";
 
@@ -114,46 +114,6 @@ export async function getFinancialDay(): Promise<FinancialDayState> {
 export async function runDemoDay(): Promise<FinancialDayState> {
   const response = await fetch(`${base}/day/demo`, { method: "POST" });
   if (!response.ok) throw new Error("The financial day could not be started.");
-  return response.json();
-}
-
-export async function getPresentationClock(): Promise<PresentationClockState> {
-  const response = await fetch(`${base}/presentation-clock`, { cache: "no-store" });
-  if (!response.ok) throw new Error("Presentation clock is temporarily unavailable.");
-  return response.json();
-}
-
-export async function playPresentationClock(): Promise<PresentationClockState> {
-  const response = await fetch(`${base}/presentation-clock/play`, { method: "POST" });
-  if (!response.ok) throw new Error("The financial day could not be started.");
-  return response.json();
-}
-
-export async function pausePresentationClock(): Promise<PresentationClockState> {
-  const response = await fetch(`${base}/presentation-clock/pause`, { method: "POST" });
-  if (!response.ok) throw new Error("The financial day could not be paused.");
-  return response.json();
-}
-
-export async function advancePresentationClock(minutes: number): Promise<PresentationClockState> {
-  const response = await fetch(`${base}/presentation-clock/advance`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ minutes }),
-  });
-  if (!response.ok) throw new Error("The financial day could not be advanced.");
-  return response.json();
-}
-
-export async function advancePresentationClockToNext(): Promise<PresentationClockState> {
-  const response = await fetch(`${base}/presentation-clock/next`, { method: "POST" });
-  if (!response.ok) throw new Error("The next checkpoint could not be reached.");
-  return response.json();
-}
-
-export async function restartPresentationClock(): Promise<PresentationClockState> {
-  const response = await fetch(`${base}/presentation-clock/restart`, { method: "POST" });
-  if (!response.ok) throw new Error("The financial day could not be restarted.");
   return response.json();
 }
 

@@ -38,7 +38,14 @@ class DataSource(DashboardModel):
 
 class HoldingView(DashboardModel):
     symbol: str
+    name: str | None = None
+    asset_class: str | None = None
+    quantity: float | None = None
+    average_price: float | None = None
+    current_price: float | None = None
     market_value: float
+    unrealized_pnl: float | None = None
+    day_pnl: float | None = None
     portfolio_weight: float
     day_change_pct: float | None = None
 
@@ -46,6 +53,19 @@ class HoldingView(DashboardModel):
 class SectorView(DashboardModel):
     sector: str
     portfolio_weight: float
+
+
+class AllocationView(DashboardModel):
+    label: str
+    portfolio_weight: float
+    market_value: float
+
+
+class PerformanceView(DashboardModel):
+    period: str
+    portfolio_return_pct: float
+    benchmark_return_pct: float | None = None
+    benchmark_label: str | None = None
 
 
 class PortfolioView(DashboardModel):
@@ -57,9 +77,15 @@ class PortfolioView(DashboardModel):
     unrealized_pnl: float
     day_pnl: float | None = None
     day_change_pct: float | None = None
+    overall_return_pct: float | None = None
+    equity_exposure_pct: float | None = None
+    defensive_exposure_pct: float | None = None
+    risk_profile: str | None = None
     holdings_count: int
     largest_holdings: list[HoldingView]
     sector_exposure: list[SectorView]
+    asset_allocation: list[AllocationView] = Field(default_factory=list)
+    performance: list[PerformanceView] = Field(default_factory=list)
 
 
 class FreshnessView(DashboardModel):
@@ -124,7 +150,7 @@ class DashboardResponse(DashboardModel):
     attention_message: str
     portfolio: PortfolioView
     daily_brief: DailyBriefView
-    important_event: EventAssessment
+    important_event: EventAssessment | None = None
     today_events: list[EventAssessment]
     agent_activity: list[ActivityItem]
     refresh: RefreshView

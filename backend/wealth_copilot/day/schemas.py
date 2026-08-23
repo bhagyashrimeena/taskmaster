@@ -8,7 +8,9 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from ..events.schemas import EventAssessment
 from ..advisor.schemas import AdvisorPacket, AdvisorResponse
 from ..story.schemas import DailyWealthStory
-from .active import AttentionSummary, ArtifactProvenance
+from ..cases.schemas import FinancialCase, FinancialCaseStatus
+from ..taskmaster.schemas import OperatorCycle
+from .active import AttentionBudget, AttentionSummary, ArtifactProvenance
 
 
 class DayModel(BaseModel):
@@ -20,6 +22,13 @@ class DayStatus(StrEnum):
     RUNNING = "running"
     COMPLETE = "complete"
     FAILED = "failed"
+
+
+class DayRunMode(StrEnum):
+    IDLE = "idle"
+    REAL = "real"
+    DEMO = "demo"
+    PRESENTATION = "presentation"
 
 
 class StepStatus(StrEnum):
@@ -118,8 +127,14 @@ def default_timeline() -> list[DayTimelineStep]:
     return [
         DayTimelineStep(step_id="morning", scheduled_time="07:00", label="Morning Pulse"),
         DayTimelineStep(step_id="health", scheduled_time="08:00", label="Portfolio Health"),
-        DayTimelineStep(step_id="event", scheduled_time="12:17", label="HDFC Bank event"),
+        DayTimelineStep(step_id="open", scheduled_time="09:15", label="Market Open Monitor"),
+        DayTimelineStep(step_id="event", scheduled_time="09:15", label="Event Investigations"),
+        DayTimelineStep(step_id="watch", scheduled_time="10:00", label="Adaptive Market Watch"),
+        DayTimelineStep(step_id="sector", scheduled_time="11:30", label="Sector Deep Dive"),
+        DayTimelineStep(step_id="learning", scheduled_time="13:00", label="Learn From Your Portfolio"),
         DayTimelineStep(step_id="close", scheduled_time="15:30", label="Market Close Review"),
+        DayTimelineStep(step_id="intelligence", scheduled_time="17:00", label="Portfolio Intelligence"),
+        DayTimelineStep(step_id="actions", scheduled_time="18:30", label="Action Queue"),
         DayTimelineStep(step_id="evening", scheduled_time="20:00", label="Evening Wealth Wrap"),
         DayTimelineStep(step_id="tomorrow", scheduled_time="21:00", label="Tomorrow Prep"),
         DayTimelineStep(step_id="story", scheduled_time="21:01", label="Daily Wealth Story"),
@@ -130,10 +145,10 @@ class FinancialDayState(DayModel):
     trading_date: date
     day_id: str = ""
     run_id: str = ""
-    scenario_id: str = "hdfc-company-shock"
+    scenario_id: str | None = None
     user_id: str = "SIM001"
     status: DayStatus = DayStatus.NOT_STARTED
-    run_mode: str = "idle"
+    run_mode: DayRunMode = DayRunMode.REAL
     started_at: datetime | None = None
     completed_at: datetime | None = None
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -146,6 +161,16 @@ class FinancialDayState(DayModel):
     events_detected: list[EventAssessment] = Field(default_factory=list)
     events_alerted: list[EventAssessment] = Field(default_factory=list)
     events_ignored: list[EventAssessment] = Field(default_factory=list)
+    financial_cases: list[FinancialCase] = Field(default_factory=list)
+    open_case_ids: list[str] = Field(default_factory=list)
+    operator_cycles: list[OperatorCycle] = Field(default_factory=list)
+    attention_budget: AttentionBudget = Field(default_factory=AttentionBudget)
+    market_snapshot_ids: list[str] = Field(default_factory=list)
+    market_watch_runs: list[datetime] = Field(default_factory=list)
+    selected_sector: str | None = None
+    learning_topic: str | None = None
+    portfolio_intelligence_summary: str | None = None
+    action_queue: list[str] = Field(default_factory=list)
     saved_stories: list[str] = Field(default_factory=list)
     saved_events: list[str] = Field(default_factory=list)
     questions_asked: list[QuestionAsked] = Field(default_factory=list)
@@ -183,4 +208,9 @@ class FinancialDayState(DayModel):
             self.day_id = f"financial-day-{self.trading_date.isoformat()}"
         if not self.run_id:
             self.run_id = f"{self.day_id}-idle"
+        self.open_case_ids = [
+            item.case_id
+            for item in self.financial_cases
+            if item.status != FinancialCaseStatus.CLOSED
+        ]
         return self

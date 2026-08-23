@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import { CSSProperties, useEffect, useRef, useState } from "react";
 
-import { getDailyWealthStory, getStoryNarration, startStoryNarration, storySceneAudioUrl } from "@/lib/api";
+import { getFinancialDay, getStoryNarration, startStoryNarration, storySceneAudioUrl } from "@/lib/api";
 import type { DailyWealthStory, StoryNarration } from "@/lib/types";
 
 
@@ -29,9 +29,12 @@ export function WealthStoryControl({ story, ready }: { story: DailyWealthStory |
   const [narration, setNarration] = useState<StoryNarration | null>(null);
   const [muted, setMuted] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const generatedMatchesStory = generated && story
-    ? generated.story_id === story.story_id && generated.day_id === story.day_id && generated.run_id === story.run_id
-    : Boolean(generated);
+  const watchInFlight = useRef(false);
+  const generatedMatchesStory = Boolean(generated && (
+    story
+      ? generated.story_id === story.story_id && generated.day_id === story.day_id && generated.run_id === story.run_id
+      : ready
+  ));
   const resolved = generatedMatchesStory ? generated : story;
   const resolvedStoryId = resolved?.story_id;
   const resolvedActive = resolved ? Math.min(active, Math.max(0, resolved.scenes.length - 1)) : 0;
@@ -76,10 +79,25 @@ export function WealthStoryControl({ story, ready }: { story: DailyWealthStory |
   }, [open, playing, resolved, scene, currentNarrationStatus]);
 
   const watch = async () => {
+    if (watchInFlight.current || !ready || !story) return;
+    watchInFlight.current = true;
     setBusy(true);
     setError(null);
     try {
-      const next = resolved ?? await getDailyWealthStory();
+      const latestDay = await getFinancialDay();
+      const next = latestDay.daily_story;
+      if (
+        latestDay.status !== "complete"
+        || !next
+        || next.story_id !== story.story_id
+        || next.run_id !== story.run_id
+      ) {
+        setGenerated(null);
+        setOpen(false);
+        setPlaying(false);
+        setError("Your visual recap is available after the current financial day is complete.");
+        return;
+      }
       setGenerated(next);
       setNarration(await startStoryNarration());
       setActive(0);
@@ -89,6 +107,7 @@ export function WealthStoryControl({ story, ready }: { story: DailyWealthStory |
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Your visual recap is not ready yet.");
     } finally {
+      watchInFlight.current = false;
       setBusy(false);
     }
   };
@@ -115,7 +134,7 @@ export function WealthStoryControl({ story, ready }: { story: DailyWealthStory |
       <section className="panel wealth-story-card" data-testid="wealth-story-card">
         <span className="wealth-story-card__icon"><Film size={18} /></span>
         <div><span className="eyebrow">Your financial day</span><h3>{resolved ? `Your financial day · ${Math.round(displayDuration ?? resolved.duration_seconds)} sec` : "Visual recap"}</h3><p>{resolved ? `${resolved.scenes.length} moments from what shaped your portfolio` : "Ready automatically when your financial day finishes."}</p>{error && <small>{error}</small>}</div>
-        {ready || resolved ? <button className="primary-button" onClick={() => void watch()} disabled={busy} data-testid="watch-wealth-story">
+        {ready && resolved ? <button className="primary-button" onClick={() => void watch()} disabled={busy} data-testid="watch-wealth-story">
           {busy ? <LoaderCircle className="spin" /> : <Play size={14} fill="currentColor" />} Watch
         </button> : <span className="wealth-story-card__availability">Available when today&apos;s financial day is complete.</span>}
       </section>

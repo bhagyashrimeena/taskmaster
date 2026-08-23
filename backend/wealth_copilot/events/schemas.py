@@ -5,7 +5,7 @@ from enum import StrEnum
 from typing import Any
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from ..market.schemas import NewsCandidate
 from ..day.active import ArtifactProvenance
@@ -47,6 +47,7 @@ class InvestigationStatus(StrEnum):
 
 class MarketEvent(EventModel):
     event_id: str = Field(min_length=3, max_length=120)
+    instrument: str | None = None
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     event_type: MarketEventType
     symbol: str | None = None
@@ -61,11 +62,28 @@ class MarketEvent(EventModel):
     source_url: str
     severity: EventSeverity = EventSeverity.MEDIUM
     has_material_news: bool = False
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("symbol")
     @classmethod
     def normalize_symbol(cls, value: str | None) -> str | None:
         return value.strip().upper() if value and value.strip() else None
+
+    @field_validator("instrument")
+    @classmethod
+    def normalize_instrument(cls, value: str | None) -> str | None:
+        if not value or not value.strip():
+            return None
+        cleaned = value.strip().upper()
+        return cleaned if ":" in cleaned else f"NSE:{cleaned}"
+
+    @model_validator(mode="after")
+    def align_instrument_and_symbol(self):
+        if self.instrument and not self.symbol:
+            self.symbol = self.instrument.split(":", 1)[-1]
+        elif self.symbol and not self.instrument:
+            self.instrument = f"NSE:{self.symbol}"
+        return self
 
     @field_validator("source_url")
     @classmethod

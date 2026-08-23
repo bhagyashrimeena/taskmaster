@@ -90,13 +90,18 @@ class EventDecisionEngine:
             for holding in portfolio.holdings
             if event.symbol and _company_matches(holding.symbol, event.symbol)
         ]
-        direct = round(sum(float(item.portfolio_weight) for item in affected), 2)
+        affected_value = sum((item.market_value for item in affected), start=0)
+        direct = (
+            round(float(affected_value / portfolio.portfolio_value * 100), 1)
+            if portfolio.portfolio_value
+            else 0.0
+        )
         sector_key = _sector_token(event.sector or "")
         sector = round(
             sum(
                 float(item.portfolio_weight)
-                for item in portfolio.holdings
-                if item.sector and sector_key and _sector_token(item.sector) == sector_key
+                for item in portfolio.sector_exposure
+                if sector_key and _sector_token(item.sector) == sector_key
             ),
             2,
         )
@@ -178,6 +183,8 @@ class EventDecisionEngine:
         scored = self.relevance.score_candidate(
             _event_candidate(event), portfolio, now=event.timestamp.astimezone(timezone.utc)
         )
+        relevance_score = scored.relevance_score
+        relevance_signals = scored.signals.model_dump()
 
         developments: list[NewsCandidate] = []
         investigation_status = InvestigationStatus.SKIPPED
@@ -197,14 +204,15 @@ class EventDecisionEngine:
             direct=direct,
             sector=sector,
             divergence=divergence,
-            relevance_score=scored.relevance_score,
+            relevance_score=relevance_score,
         )
         notification_required = decision == EventDecision.ALERT
         if decision == EventDecision.ALERT:
             title = f"Unusual move in {event.company or event.symbol}"
             reason = (
                 f"{event.company or event.symbol} moved {event.price_change_pct:.1f}% versus "
-                f"{event.sector_change_pct:.1f}% for its sector; {direct:.2f}% of the portfolio is directly exposed."
+                f"{event.sector_change_pct:.1f}% for its sector; {direct:.1f}% of the portfolio is directly exposed "
+                f"and total financial-sector exposure is {sector:.1f}%."
             )
             actions = ["explain", "investigate", "save_for_evening"]
         elif decision == EventDecision.IGNORE:
@@ -223,7 +231,7 @@ class EventDecisionEngine:
             EventTraceStep(stage="EVENT_DETECTED", outcome="triggered" if triggered else "below_threshold", details={"event_id": event.event_id, "type": event.event_type.value}),
             EventTraceStep(stage="PORTFOLIO_CHECK", outcome="direct" if affected else ("sector" if sector else "unrelated"), details={"affected_holdings": [item.symbol for item in affected], "direct_exposure_pct": direct, "sector_exposure_pct": sector}),
             EventTraceStep(stage="MARKET_INVESTIGATION", outcome=investigation_status.value, details={"developments_found": len(developments), "error": investigation_error}),
-            EventTraceStep(stage="RELEVANCE", outcome=f"{scored.relevance_score:.2f}/100", details={"signals": scored.signals.model_dump()}),
+            EventTraceStep(stage="RELEVANCE", outcome=f"{relevance_score:.2f}/100", details={"signals": relevance_signals}),
             EventTraceStep(stage="DECISION", outcome=decision.value, details={"notification_required": notification_required}),
         ]
         assessment = EventAssessment(
@@ -241,7 +249,7 @@ class EventDecisionEngine:
             investigation_status=investigation_status,
             investigation_error=investigation_error,
             developments=developments,
-            relevance_score=scored.relevance_score,
+            relevance_score=relevance_score,
             decision=decision,
             notification_required=notification_required,
             title=title,

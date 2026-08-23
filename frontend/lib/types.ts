@@ -3,7 +3,14 @@ export type RefreshPhase = "idle" | "queued" | "running" | "complete" | "failed"
 
 export interface HoldingView {
   symbol: string;
+  name: string | null;
+  asset_class: string | null;
+  quantity: number | null;
+  average_price: number | null;
+  current_price: number | null;
   market_value: number;
+  unrealized_pnl: number | null;
+  day_pnl: number | null;
   portfolio_weight: number;
   day_change_pct: number | null;
 }
@@ -11,6 +18,19 @@ export interface HoldingView {
 export interface SectorView {
   sector: string;
   portfolio_weight: number;
+}
+
+export interface AllocationView {
+  label: string;
+  portfolio_weight: number;
+  market_value: number;
+}
+
+export interface PerformanceView {
+  period: string;
+  portfolio_return_pct: number;
+  benchmark_return_pct: number | null;
+  benchmark_label: string | null;
 }
 
 export interface StoryView {
@@ -91,9 +111,15 @@ export interface DashboardData {
     unrealized_pnl: number;
     day_pnl: number | null;
     day_change_pct: number | null;
+    overall_return_pct: number | null;
+    equity_exposure_pct: number | null;
+    defensive_exposure_pct: number | null;
+    risk_profile: string | null;
     holdings_count: number;
     largest_holdings: HoldingView[];
     sector_exposure: SectorView[];
+    asset_allocation: AllocationView[];
+    performance: PerformanceView[];
   };
   daily_brief: {
     day_id: string;
@@ -109,7 +135,7 @@ export interface DashboardData {
     analyzed_count: number;
     stories: StoryView[];
   };
-  important_event: EventAssessment;
+  important_event: EventAssessment | null;
   today_events: EventAssessment[];
   agent_activity: Array<{
     stage: string;
@@ -133,7 +159,7 @@ export interface DashboardData {
   disclaimer: string;
 }
 
-export type InteractionMode = "explain" | "chat" | "research";
+export type InteractionMode = "explain" | "chat" | "text" | "voice" | "call" | "research";
 
 export interface SourceReference {
   name: string;
@@ -153,6 +179,8 @@ export interface SurfaceContext {
   target_type: string;
   target_id: string | null;
   title: string;
+  portfolio_as_of: string;
+  source_checkpoint: string;
   facts: string[];
   interpretation: string[];
   unknowns: string[];
@@ -229,7 +257,7 @@ export interface AudioGenerationResponse {
 export type DayStatus = "not_started" | "running" | "complete" | "failed";
 export type DayStepStatus = "pending" | "running" | "complete" | "failed";
 
-export interface PresentationClockState {
+export interface FinancialDayClockState {
   trading_date: string;
   current_time: string;
   speed: number;
@@ -244,7 +272,7 @@ export interface FinancialDayState {
   trading_date: string;
   day_id: string;
   run_id: string;
-  scenario_id: string;
+  scenario_id: string | null;
   user_id: string;
   status: DayStatus;
   run_mode: string;

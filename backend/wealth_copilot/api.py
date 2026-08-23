@@ -3,8 +3,8 @@
 from contextlib import asynccontextmanager
 from datetime import date
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from .advisor.schemas import (
@@ -14,6 +14,7 @@ from .advisor.schemas import (
     SendAdvisorPacketRequest,
 )
 from .advisor.service import advisor_service
+from .config import application_today
 
 from .agents.event_watcher import save_event_action
 from .dashboard.schemas import (
@@ -24,7 +25,7 @@ from .dashboard.schemas import (
 )
 from .dashboard.service import dashboard_service
 from .interaction.context import resolve_surface_context
-from .interaction.memory import daily_interaction_store
+from .interaction.memory import conversation_store, daily_interaction_store
 from .interaction.research_jobs import research_job_manager
 from .interaction.schemas import (
     ConversationRequest,
@@ -40,8 +41,10 @@ from .media.schemas import AudioBrief, AudioBriefType, AudioGenerationResponse
 from .media.service import media_service
 from .day.orchestrator import day_orchestrator
 from .day.presentation import (
+    FinancialDayClockState,
     PresentationAdvanceRequest,
     PresentationClockState,
+    financial_day_clock,
     presentation_clock,
 )
 from .day.scheduler import day_scheduler
@@ -53,20 +56,36 @@ from .story.service import daily_story_service
 from .events import daily_event_store
 from .market.cache import news_candidate_cache
 from .simulation import AdvanceSimulationRequest, SimulationState, simulation_service
+from .readiness import GoogleReadinessReport, google_readiness, log_google_readiness
+from .cases.schemas import FinancialCase
+from .product_api.schemas import (
+    AlertCategory,
+    AlertDetailResponse,
+    AlertInboxResponse,
+    CopilotBootstrapResponse,
+    PortfolioResponse,
+    TimelineResponse,
+    TodayResponse,
+)
+from .product_api.service import product_api_service
+from .product_api.stream import product_event_stream
+from .voice import VoiceSessionRequest, VoiceSessionResponse, voice_session_service
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    log_google_readiness()
     day_scheduler.start()
     await day_orchestrator.recover_interrupted_demo()
+    await financial_day_clock.recover()
     yield
-    await presentation_clock.stop()
+    await financial_day_clock.stop()
     await day_scheduler.stop()
 
 
 app = FastAPI(
     title="Wealth Copilot API",
-    version="0.9.1",
+    version="1.0.0",
     description="Provider-neutral portfolio intelligence and TaskMaster interactions.",
     lifespan=lifespan,
 )
@@ -84,9 +103,28 @@ app.add_middleware(
 )
 
 
+async def _clear_scenario_state() -> None:
+    """Clear process-local work that is scoped to the active simulation run."""
+
+    await day_orchestrator.cancel_background_run()
+    await dashboard_service.clear_transient_state()
+    await research_job_manager.clear()
+    await media_service.clear()
+    await story_narration_service.clear()
+    conversation_store.clear()
+    daily_interaction_store.clear()
+
+
 @app.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/api/v1/readiness", response_model=GoogleReadinessReport)
+async def readiness() -> GoogleReadinessReport:
+    """Return credential-safe configuration readiness for Google capabilities."""
+
+    return google_readiness()
 
 
 @app.get("/api/v1/simulation", response_model=SimulationState)
@@ -100,6 +138,8 @@ async def load_simulation_scenario(scenario_id: str) -> SimulationState:
         state = simulation_service.load_scenario(scenario_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    await financial_day_clock.stop()
+    await _clear_scenario_state()
     news_candidate_cache.clear()
     daily_event_store.clear()
     financial_day_store.clear()
@@ -108,6 +148,8 @@ async def load_simulation_scenario(scenario_id: str) -> SimulationState:
 
 @app.post("/api/v1/simulation/reset", response_model=SimulationState)
 async def reset_simulation() -> SimulationState:
+    await financial_day_clock.stop()
+    await _clear_scenario_state()
     news_candidate_cache.clear()
     daily_event_store.clear()
     financial_day_store.clear()
@@ -134,6 +176,84 @@ async def refresh_dashboard() -> RefreshView:
     """Enqueue a refresh without holding the page response open for Search."""
 
     return await dashboard_service.start_refresh()
+
+
+@app.get("/api/v1/today", response_model=TodayResponse)
+async def today() -> TodayResponse:
+    """Return only the information the user needs to understand next."""
+
+    return await product_api_service.today()
+
+
+@app.get("/api/v1/portfolio", response_model=PortfolioResponse)
+async def portfolio() -> PortfolioResponse:
+    """Return the canonical calculated portfolio view for the Portfolio page."""
+
+    return await product_api_service.portfolio()
+
+
+@app.get("/api/v1/alerts", response_model=AlertInboxResponse)
+async def alerts(category: AlertCategory | None = None) -> AlertInboxResponse:
+    """Return the event inbox, optionally filtered by product category."""
+
+    return await product_api_service.alerts(category)
+
+
+@app.get("/api/v1/alerts/{case_id}", response_model=AlertDetailResponse)
+async def alert_detail(case_id: str) -> AlertDetailResponse:
+    """Return one financial case with its retained assessment and chart data."""
+
+    try:
+        return await product_api_service.alert_detail(case_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get("/api/v1/timeline", response_model=TimelineResponse)
+async def timeline() -> TimelineResponse:
+    """Return the focused projection of FinancialDayState for the Timeline page."""
+
+    return await product_api_service.timeline()
+
+
+@app.get("/api/v1/copilot", response_model=CopilotBootstrapResponse)
+async def copilot_bootstrap(
+    conversation_id: str | None = None,
+) -> CopilotBootstrapResponse:
+    """Return stable day context and prompts before the chat UI mounts."""
+
+    return await product_api_service.copilot_bootstrap(conversation_id)
+
+
+@app.post("/api/v1/copilot", response_model=ConversationResponse)
+async def copilot(request: ConversationRequest) -> ConversationResponse:
+    """Ask Wealth Copilot while preserving the existing conversation contract."""
+
+    return await chat(request)
+
+
+@app.post("/api/v1/copilot/voice/session", response_model=VoiceSessionResponse)
+async def copilot_voice_session(
+    request: VoiceSessionRequest,
+) -> VoiceSessionResponse:
+    """Mint a short-lived room token without exposing LiveKit credentials."""
+
+    return voice_session_service.create(request)
+
+
+@app.get("/api/v1/events/stream")
+async def events_stream(request: Request, once: bool = False) -> StreamingResponse:
+    """Push financial-day changes to clients using server-sent events."""
+
+    return StreamingResponse(
+        product_event_stream(request, once=once),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.post(
@@ -190,7 +310,7 @@ async def save_story(story_id: str) -> SaveStoryResponse:
         await resolve_surface_context(story_id=story_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    today = date.today()
+    today = application_today()
     daily_interaction_store.save_story(story_id, today)
     financial_day_store.update(
         lambda state: state.saved_stories.append(story_id)
@@ -255,9 +375,26 @@ async def current_financial_day() -> FinancialDayState:
     return day_orchestrator.current_state()
 
 
-@app.get("/api/v1/day/{trading_date}", response_model=FinancialDayState)
-async def financial_day(trading_date: date) -> FinancialDayState:
-    return financial_day_store.get(trading_date)
+@app.get("/api/v1/cases", response_model=list[FinancialCase])
+async def financial_cases() -> list[FinancialCase]:
+    """Return material cases retained for the active financial day."""
+
+    return day_orchestrator.current_state().financial_cases
+
+
+@app.get("/api/v1/cases/{case_id}", response_model=FinancialCase)
+async def financial_case(case_id: str) -> FinancialCase:
+    case = next(
+        (
+            item
+            for item in day_orchestrator.current_state().financial_cases
+            if item.case_id == case_id
+        ),
+        None,
+    )
+    if case is None:
+        raise HTTPException(status_code=404, detail="Unknown financial case")
+    return case
 
 
 @app.post("/api/v1/day/demo", response_model=FinancialDayState, status_code=202)
@@ -267,9 +404,45 @@ async def run_demo_day() -> FinancialDayState:
     return await day_orchestrator.start_demo_day()
 
 
+@app.get("/api/v1/day/clock", response_model=FinancialDayClockState)
+async def financial_day_clock_state() -> FinancialDayClockState:
+    """Return the persisted state of the product financial-day clock."""
+
+    return financial_day_clock.state()
+
+
+@app.post(
+    "/api/v1/day/clock/start",
+    response_model=FinancialDayClockState,
+    status_code=202,
+)
+async def start_financial_day_clock() -> FinancialDayClockState:
+    """Start or resume the current financial day without duplicating work."""
+
+    return await financial_day_clock.play()
+
+
+@app.post("/api/v1/day/clock/pause", response_model=FinancialDayClockState)
+async def pause_financial_day_clock() -> FinancialDayClockState:
+    """Pause time after the active idempotent checkpoint settles."""
+
+    return await financial_day_clock.pause()
+
+
+@app.post(
+    "/api/v1/day/clock/restart",
+    response_model=FinancialDayClockState,
+    status_code=202,
+)
+async def restart_financial_day_clock() -> FinancialDayClockState:
+    """Reset today's simulated state and immediately start it from 07:00."""
+
+    return await financial_day_clock.restart_and_play()
+
+
 @app.get("/api/v1/presentation-clock", response_model=PresentationClockState)
 async def presentation_clock_state() -> PresentationClockState:
-    """Return the accelerated clock used only by the presentation surface."""
+    """Compatibility alias for the canonical product day clock."""
 
     return presentation_clock.state()
 
@@ -313,13 +486,24 @@ async def restart_presentation_clock() -> PresentationClockState:
     return await presentation_clock.restart()
 
 
+@app.get("/api/v1/day/{trading_date}", response_model=FinancialDayState)
+async def financial_day(trading_date: date) -> FinancialDayState:
+    return financial_day_store.get(trading_date)
+
+
 @app.post("/api/v1/day/steps/{step_id}", response_model=FinancialDayState)
 async def run_day_step(step_id: str) -> FinancialDayState:
     operations = {
         "morning": day_orchestrator.run_morning_pulse,
         "health": day_orchestrator.run_portfolio_health,
+        "open": day_orchestrator.run_market_open_monitor,
+        "watch": day_orchestrator.run_adaptive_market_watch,
+        "sector": day_orchestrator.run_sector_deep_dive,
         "event": day_orchestrator.handle_market_event,
+        "learning": day_orchestrator.run_contextual_learning,
         "close": day_orchestrator.run_market_close,
+        "intelligence": day_orchestrator.run_portfolio_intelligence,
+        "actions": day_orchestrator.run_action_queue,
         "evening": day_orchestrator.run_evening_wrap,
         "tomorrow": day_orchestrator.prepare_tomorrow,
         "story": day_orchestrator.generate_daily_story,

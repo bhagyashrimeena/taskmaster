@@ -6,110 +6,105 @@ This document describes the implementation currently present in the repository. 
 
 ```mermaid
 flowchart LR
-    user([User])
-
-    subgraph interfaces[User interfaces]
-        dashboard[Dashboard]
-        chat[Chat / Explain]
-        audio[Audio Brief]
-        story[Daily Wealth Story]
+    subgraph client ["Client"]
+        web["Next.js Wealth Copilot"]
     end
 
-    taskmaster[Google ADK TaskMaster<br/>root_agent / taskmaster]
-
-    subgraph specialists[Specialists]
-        portfolio[Portfolio Agent<br/>portfolio_agent]
-        daily[Market Intelligence +<br/>daily brief workflow<br/>market_intelligence_agent + daily_brief_workflow]
-        research[Research Agent<br/>research_agent]
-        media[Media Agent<br/>media_agent]
+    subgraph gateway ["API Gateway"]
+        api["FastAPI REST and media API"]
     end
 
-    subgraph inputs[Data and tools]
-        simulated[(Simulated Portfolio Provider<br/>SimulatedPortfolioProvider)]
-        search[(Google Search grounded<br/>live market/news data)]
+    subgraph service ["Core Runtime"]
+        day["Checkpoint Scheduler and Day Orchestrator"]
+        taskmaster["ADK TaskMaster"]
+        agents["Portfolio, Market, Research, and Media Agents"]
+        decisions["Relevance and Event Decision Engines"]
+        interaction["Interaction and Advisor Handoff"]
     end
 
-    subgraph decisions[Decision layer]
-        relevance[Deterministic Relevance Engine<br/>RelevanceEngine]
-        watcher[Event Watcher<br/>EventDecisionEngine]
+    subgraph datastore ["State and Artifacts"]
+        financialDay["Financial Day and Event State"]
+        conversations["Conversations and Research Jobs"]
+        mediaStore["Stories and Gemini Audio"]
     end
 
-    subgraph continuity[State and orchestration]
-        daystate[(FinancialDayState<br/>FinancialDayStore)]
-        orchestrator[Day Orchestrator<br/>DayOrchestrator]
+    subgraph external ["External Providers"]
+        portfolioSource["Portfolio Provider: simulated active, Zerodha optional"]
+        vertex["Vertex AI Gemini via ADC"]
+        search["Google Search Grounding"]
+        advisor["Human Advisor"]
     end
 
-    advisor[Advisor Handoff<br/>reviewed human layer]
+    subgraph async ["Asynchronous Triggers"]
+        checkpoints["Checkpoint Schedule"]
+    end
 
-    user --> dashboard & chat & audio & story
-    dashboard & chat & audio & story --> taskmaster
-    taskmaster --> portfolio & daily & research & media
-    portfolio --> simulated
-    daily --> search
-    daily --> relevance
-    taskmaster --> watcher
-    watcher --> portfolio
-    watcher --> relevance
-    taskmaster --> daystate
-    orchestrator --> daystate
-    orchestrator --> portfolio & watcher & media & story
-    chat --> advisor
-    dashboard --> advisor
-    daystate --> dashboard & audio & story & advisor
-
-    classDef user fill:#185744,color:#fff,stroke:#103f32,stroke-width:2px;
-    classDef supervisor fill:#244f77,color:#fff,stroke:#173957,stroke-width:2px;
-    classDef state fill:#fff2df,color:#4d3218,stroke:#ad641f,stroke-width:2px;
-    classDef deterministic fill:#e8f7f0,color:#14533d,stroke:#6aac8e;
-    classDef data fill:#f5f6f3,color:#17211d,stroke:#aab5ad;
-
-    class user user;
-    class taskmaster supervisor;
-    class daystate,orchestrator state;
-    class relevance,watcher deterministic;
-    class simulated,search data;
+    web -->|"HTTPS and audio"| api
+    api -->|"Runs checkpoints"| day
+    api -->|"Routes requests"| taskmaster
+    api -->|"Handles actions"| interaction
+    checkpoints -.->|"Triggers"| day
+    day -->|"Coordinates"| taskmaster
+    day -->|"Applies rules"| decisions
+    day -->|"Writes continuity"| financialDay
+    taskmaster -->|"Delegates"| agents
+    agents -->|"Supplies signals"| decisions
+    agents -->|"Stores media"| mediaStore
+    decisions -->|"Records outcomes"| financialDay
+    interaction -->|"Stores context"| conversations
+    agents -.->|"Portfolio data"| portfolioSource
+    agents -.->|"Gemini reasoning"| vertex
+    agents -.->|"Grounded research"| search
+    interaction -.->|"Sends handoff"| advisor
 ```
 
-The four interfaces share the same TaskMaster and retained underlying context. TaskMaster routes intent and delegates work; it does not replace the deterministic scoring or event-decision code. The active demo portfolio is simulated. Google Search is the live market/news path when configured; it is not a portfolio provider.
+This is a logical runtime architecture rather than a claim that every box is independently deployed. The Next.js experience exposes the dashboard, chat, generated audio, and Daily Wealth Story through the FastAPI boundary. TaskMaster routes intent and delegates specialist work, while deterministic code owns relevance scoring and event decisions. The active demo portfolio is simulated, Zerodha remains an optional provider adapter, and Gemini reasoning and TTS use Vertex AI through Application Default Credentials. Google Search is the grounded market/news path, not a portfolio provider.
 
 ## 2. Attention Decision Pipeline
 
 ```mermaid
 flowchart LR
-    observe[Observe market and news]
-    filter[Filter noise<br/>normalize and deduplicate]
-    match[Match against portfolio<br/>holdings and sectors]
-    exposure[Calculate direct and<br/>sector exposure]
-    materiality[Assess materiality<br/>event type and movement]
-    investigate[Investigate<br/>when a trigger fires]
-    score[Calculate relevance score<br/>RelevanceEngine - deterministic]
-    decision{Decision}
-    ignore[IGNORE]
-    monitor[MONITOR]
-    investigateOutcome[INVESTIGATE]
-    alert[ALERT]
-    explain[Explain context<br/>facts, interpretation, unknowns]
-    userdecides[User decides what to do]
+    observe(["Observe event"])
+    normalize["Normalize and deduplicate"]
+    match["Match portfolio"]
+    exposure["Direct and sector exposure"]
+    materiality["Assess materiality"]
+    investigate["Grounded search investigation"]
+    verify["Verify trusted sources"]
+    score["Deterministic relevance score"]
+    decision{"Decision engine"}
+    ignore["IGNORE: no interruption"]
+    monitor["MONITOR: watch queue"]
+    investigateOutcome["INVESTIGATE: research brief"]
+    alert["ALERT: contextual alert"]
+    financialDay[("Financial Day State")]
+    explain["Explain why it matters"]
+    userAction{"User action"}
+    review["Review"]
+    deeper["Research deeper"]
+    advisor["Advisor handoff"]
+    dismiss["Dismiss"]
 
-    observe --> filter --> match --> exposure --> materiality --> investigate --> score --> decision
+    observe --> normalize --> match --> exposure --> materiality
+    materiality --> investigate --> verify --> score --> decision
     decision --> ignore & monitor & investigateOutcome & alert
-    ignore & monitor & investigateOutcome & alert --> explain --> userdecides
+    ignore & monitor & investigateOutcome & alert --> financialDay
+    monitor -.->|"When reviewed"| explain
+    investigateOutcome --> explain
+    alert --> explain
+    explain --> userAction
+    userAction --> review & deeper & advisor & dismiss
 
-    note[Attention decisions indicate information priority,<br/>not investment instructions.]
-    explain -.-> note
+    classDef agent fill:#C2E5FF,stroke:#3DADFF;
+    classDef deterministic fill:#FFE0C2,stroke:#FF9E42;
+    classDef human fill:#CDF4D3,stroke:#66D575;
 
-    classDef process fill:#f5f6f3,color:#17211d,stroke:#aab5ad;
-    classDef deterministic fill:#e8f7f0,color:#14533d,stroke:#6aac8e;
-    classDef outcome fill:#fff2df,color:#4d3218,stroke:#ad641f;
-    classDef boundary fill:#eef3f0,color:#30473c,stroke:#9aaea1,stroke-dasharray: 5 5;
-
-    class observe,filter,match,exposure,materiality,investigate,explain,userdecides process;
-    class score deterministic;
-    class decision,ignore,monitor,investigateOutcome,alert outcome;
-    class note boundary;
+    class investigate,verify,explain agent;
+    class normalize,match,exposure,materiality,score,decision deterministic;
+    class userAction,review,deeper,advisor,dismiss human;
 ```
 
-The daily brief uses `RelevanceEngine` to normalize, portfolio-match, score, and rank candidate news. The Event Watcher uses the same relevance engine after its deterministic trigger rules and investigation path. `IGNORE`, `MONITOR`, `INVESTIGATE`, and `ALERT` express attention priority; none is a trade instruction.
+Blue steps are agent-assisted investigation and explanation. Orange steps are deterministic matching, exposure calculation, materiality assessment, scoring, and triage. Every outcome is persisted with provenance; only material `MONITOR`, `INVESTIGATE`, or `ALERT` items reach the explanation and user-action path. `IGNORE`, `MONITOR`, `INVESTIGATE`, and `ALERT` express attention priority, never a trade instruction.
 
 ## 3. Autonomous Financial Day
 
@@ -134,7 +129,7 @@ flowchart TB
 
     orchestrator[DayOrchestrator<br/>known checkpoint operations]
     scheduler[DayScheduler<br/>real-time schedule when enabled]
-    clock[Presentation clock<br/>accelerated demo controls]
+    clock[Financial-day clock<br/>Timeline start / pause / restart]
 
     scheduler --> pulse & health & close & wrap & tomorrow & wealthstory
     clock --> orchestrator
@@ -161,6 +156,24 @@ flowchart TB
 
 `FinancialDayState` carries the shared `day_id`, `run_id`, timeline, event assessments, portfolio snapshots, audio identifiers, market-close review, advisor interactions, tomorrow items, and Daily Wealth Story identity. The HDFC event is not a scheduled checkpoint: it enters the Event Watcher when its market trigger occurs during market hours.
 
+### Live voice call path
+
+```mermaid
+flowchart LR
+    browser[Copilot call UI] --> token[POST /api/v1/copilot/voice/session]
+    token --> room[Short-lived LiveKit room]
+    room --> stt[LiveKit Inference STT]
+    stt --> worker[TaskMasterVoiceAgent]
+    worker --> copilot[Canonical InteractionService]
+    copilot --> taskmaster[Google ADK TaskMaster]
+    taskmaster --> copilot --> worker
+    worker --> tts[LiveKit Inference TTS]
+    tts --> room --> browser
+    room -. final transcripts .-> browser
+```
+
+The worker supplies no independent financial reasoning model. Its LiveKit LLM slot is a non-callable sentinel, and `llm_node` delegates to `InteractionService` with `mode=call`; any bypass fails explicitly. The room is dispatched by the short-lived token to the configured `wealth-copilot` worker.
+
 ## 4. HDFC Hero Event Sequence
 
 ```mermaid
@@ -178,12 +191,12 @@ sequenceDiagram
 
     Market->>EW: HDFCBANK move detected<br/>-5.4% vs sector -0.8%
     EW->>PA: Check active portfolio exposure
-    PA-->>EW: Direct exposure 18.01%<br/>sector exposure ~28%
+    PA-->>EW: Direct exposure 17.21%<br/>sector exposure 27.26%
     EW->>EW: Apply deterministic trigger rules
     EW->>Inv: Investigate triggered event
     Inv-->>EW: Retained development context
     EW->>RE: Calculate relevance from event + portfolio
-    RE-->>EW: 94.21 / 100
+    RE-->>EW: 93.11 / 100
     EW->>EW: Decision = ALERT
     EW->>Day: Record assessment, trace, and notification_required
     Day-->>TM: Retained event context available
@@ -203,7 +216,7 @@ sequenceDiagram
     Note over EW,User: Attention priority, not an investment instruction.
 ```
 
-The demonstrated values are the current deterministic HDFC scenario values: HDFCBANK `-5.4%`, sector `-0.8%`, direct exposure `18.01%`, sector exposure approximately `28%`, and relevance `94.21 / 100`. TaskMaster surfaces and explains the retained decision; it does not calculate the deterministic score itself.
+The demonstrated values are the current deterministic HDFC scenario values: HDFCBANK `-5.4%`, sector `-0.8%`, direct exposure `17.21%`, sector exposure `27.26%`, and relevance `93.11 / 100`. TaskMaster surfaces and explains the retained decision; it does not calculate the deterministic score itself.
 
 ## How to explain this in 30 seconds
 

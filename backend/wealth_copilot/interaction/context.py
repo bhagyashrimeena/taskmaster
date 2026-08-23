@@ -9,6 +9,13 @@ def _source(name: str, url: str, authority: str, kind: str) -> SourceReference:
     return SourceReference(name=name, url=url, authority=authority, kind=kind)
 
 
+def _source_checkpoint(portfolio, provenance=None) -> str:
+    checkpoint = getattr(provenance, "source_checkpoint", None)
+    if checkpoint and checkpoint != "normal":
+        return checkpoint
+    return portfolio.source.checkpoint or portfolio.as_of.strftime("%H:%M")
+
+
 async def resolve_surface_context(
     *, story_id: str | None = None, event_id: str | None = None
 ) -> SurfaceContext:
@@ -28,16 +35,19 @@ async def resolve_surface_context(
         if story is None:
             raise ValueError(f"Unknown story_id: {story_id}")
         holdings = ", ".join(story.affected_holdings) or "sector exposure"
+        checkpoint = _source_checkpoint(portfolio, dashboard.daily_brief.provenance)
         return SurfaceContext(
             day_id=dashboard.day_id,
             run_id=dashboard.run_id,
             target_type="story",
             target_id=story.id,
             title=story.headline,
+            portfolio_as_of=portfolio.as_of,
+            source_checkpoint=checkpoint,
             facts=[
                 story.summary,
                 f"Affected portfolio holdings: {holdings}.",
-                f"Direct exposure is {story.direct_exposure_pct:.2f}% and sector exposure is {story.sector_exposure_pct:.2f}%.",
+                f"At the {checkpoint} portfolio snapshot, direct exposure is {story.direct_exposure_pct:.2f}% and sector exposure is {story.sector_exposure_pct:.2f}%.",
                 f"Deterministic relevance score: {story.relevance_score:.1f}/100.",
             ],
             interpretation=[story.why_am_i_seeing_this],
@@ -53,7 +63,11 @@ async def resolve_surface_context(
             portfolio_context=portfolio_context,
         )
     if event_id:
-        events = [dashboard.important_event, *dashboard.today_events]
+        events = [
+            item
+            for item in [dashboard.important_event, *dashboard.today_events]
+            if item is not None
+        ]
         event = next(
             (item for item in events if item.event.event_id == event_id), None
         )
@@ -67,16 +81,19 @@ async def resolve_surface_context(
             for item in event.developments
         )
         relative = event.sector_relative_move_pct
+        checkpoint = _source_checkpoint(portfolio, event.provenance)
         return SurfaceContext(
             day_id=dashboard.day_id,
             run_id=dashboard.run_id,
             target_type="event",
             target_id=event.event.event_id,
             title=event.title,
+            portfolio_as_of=portfolio.as_of,
+            source_checkpoint=checkpoint,
             facts=[
                 f"{event.event.company or event.event.symbol} moved {event.event.price_change_pct:.1f}% while its sector moved {event.event.sector_change_pct:.1f}%.",
                 f"The sector-relative move was {relative:.1f} percentage points." if relative is not None else "No sector-relative move was available.",
-                f"Your direct exposure is {event.affected_portfolio_percentage:.2f}% and sector exposure is {event.sector_exposure_percentage:.2f}%.",
+                f"At the {checkpoint} portfolio snapshot, your direct exposure is {event.affected_portfolio_percentage:.2f}% and sector exposure is {event.sector_exposure_percentage:.2f}%.",
                 f"Deterministic relevance score: {event.relevance_score:.2f}/100; attention decision: {event.decision.value}.",
             ],
             interpretation=[event.reason],
@@ -84,22 +101,37 @@ async def resolve_surface_context(
             sources=sources,
             portfolio_context=portfolio_context,
         )
-    top = dashboard.daily_brief.stories[0]
+    top = dashboard.daily_brief.stories[0] if dashboard.daily_brief.stories else None
+    checkpoint = _source_checkpoint(portfolio)
     largest = ", ".join(
         f"{holding.symbol} {holding.portfolio_weight:.2f}%"
         for holding in portfolio.largest_holdings
     )
+    facts = [
+        portfolio_context,
+        f"Largest holdings by portfolio weight: {largest}.",
+    ]
+    if top is not None:
+        facts.append(
+            f"{len(dashboard.daily_brief.stories)} personalized stories are available; "
+            f"the highest-ranked is: {top.headline}"
+        )
+    if dashboard.important_event is not None:
+        facts.append(
+            f"The important event is "
+            f"{dashboard.important_event.event.company or dashboard.important_event.event.symbol} "
+            f"with relevance {dashboard.important_event.relevance_score:.2f}/100."
+        )
+    else:
+        facts.append("No market event currently crosses the interruption threshold.")
     return SurfaceContext(
         day_id=dashboard.day_id,
         run_id=dashboard.run_id,
         target_type="dashboard",
         title="Today's Wealth Copilot dashboard",
-        facts=[
-            portfolio_context,
-            f"Largest holdings by portfolio weight: {largest}.",
-            f"Five personalized stories are available; the highest-ranked is: {top.headline}",
-            f"The important event is {dashboard.important_event.event.company} with relevance {dashboard.important_event.relevance_score:.2f}/100.",
-        ],
+        portfolio_as_of=portfolio.as_of,
+        source_checkpoint=checkpoint,
+        facts=facts,
         interpretation=[dashboard.attention_message],
         unknowns=["A broad question may need a more specific story, event, or portfolio topic."],
         sources=[],
