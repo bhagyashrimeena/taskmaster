@@ -3,6 +3,7 @@
 from collections.abc import AsyncIterable
 import json
 import logging
+from uuid import uuid4
 
 from livekit.agents import (
     Agent,
@@ -20,6 +21,7 @@ from ..config import get_settings
 from ..day.store import financial_day_store
 from ..interaction.schemas import ConversationRequest, ConversationResponse, InteractionMode
 from ..interaction.service import InteractionService, interaction_service
+from .context import build_voice_context
 
 
 logger = logging.getLogger(__name__)
@@ -85,8 +87,23 @@ class TaskMasterVoiceAgent(Agent):
     async def on_enter(self) -> None:
         if not self._greet:
             return
+        conversation_id = self.conversation_id or uuid4().hex
+        self.conversation_id = conversation_id
+        try:
+            context = await build_voice_context(conversation_id, InteractionMode.CALL.value)
+            active_case = context.active_cases[0].title if context.active_cases else None
+            case_line = f" One active case is open: {active_case}." if active_case else " No active case is open."
+            greeting = (
+                f"I have today's portfolio, {context.portfolio.holdings_count} holdings, "
+                f"{context.attention_summary.portfolio_relevant_story_count} relevant stories, "
+                f"and {context.attention_summary.active_case_count} active cases loaded."
+                f"{case_line} What would you like to look at first?"
+            )
+        except Exception:
+            logger.exception("Voice context greeting failed")
+            greeting = "You are connected to Wealth Copilot. What would you like to understand?"
         self.session.say(
-            "You are connected to Wealth Copilot. What would you like to understand?",
+            greeting,
             allow_interruptions=True,
         )
 
@@ -101,12 +118,16 @@ class TaskMasterVoiceAgent(Agent):
     async def respond_to_transcript(self, transcript: str) -> ConversationResponse:
         """Route one finalized voice turn through the same TaskMaster conversation."""
 
+        conversation_id = self.conversation_id or uuid4().hex
+        self.conversation_id = conversation_id
+        voice_context = await build_voice_context(conversation_id, InteractionMode.CALL.value)
         response = await self._service.respond(
             ConversationRequest(
                 conversation_id=self.conversation_id,
                 message=transcript,
                 mode=InteractionMode.CALL,
                 active_event_id=_event_id_for_case(self.current_case_id),
+                voice_context=voice_context,
             )
         )
         self.conversation_id = response.conversation_id

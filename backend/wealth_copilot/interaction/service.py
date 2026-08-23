@@ -2,6 +2,7 @@
 
 import asyncio
 from datetime import datetime, timezone
+import json
 import logging
 import re
 from typing import Awaitable, Callable
@@ -142,6 +143,14 @@ def _fallback_answer(context: SurfaceContext, mode: InteractionMode) -> str:
     ).strip()
 
 
+def _json_context(value) -> str:
+    if value is None:
+        return "none"
+    if hasattr(value, "model_dump_json"):
+        return value.model_dump_json()
+    return json.dumps(value, default=str)
+
+
 TaskMasterCall = Callable[[str, float], Awaitable[tuple]]
 
 
@@ -199,15 +208,24 @@ class InteractionService:
         )
         context = await resolve_surface_context(story_id=story_id, event_id=event_id)
         route = _route(request, context)
+        voice_context = request.voice_context
+        if voice_context is None and request.mode in {InteractionMode.VOICE, InteractionMode.CALL}:
+            from ..voice.context import build_voice_context
+
+            voice_context = await build_voice_context(conversation_id, request.mode.value)
         history = previous.history[-6:]
         history_text = "\n".join(f"{role}: {text}" for role, text in history) or "None"
         if request.mode == InteractionMode.RESEARCH:
             mode_rule = "You MUST delegate to research_agent exactly once. Return source-first research with exact URLs."
         elif request.mode in {InteractionMode.VOICE, InteractionMode.CALL}:
             mode_rule = (
-                "Use supplied retained context first. Do not call research_agent or refresh/search tools. "
+                "Use VOICE_CONTEXT and supplied retained context first. If a value is present in VOICE_CONTEXT, answer from it. "
+                "Resolve follow-ups like 'why does it matter?', 'what about the second one?', or 'is that serious?' from pinned_context, previous_voice_turns, active_cases, and relevant_stories. "
+                "If the needed value is not in context, call the appropriate backend tool/agent or say what is missing. "
+                "Do not invent holdings, prices, sources, events, URLs, or market movements. "
                 "Answer for speech in at most 100 words, lead with the direct answer, and use short sentences. "
-                "Do not say 'dashboard data', 'system state', 'retained context', or expose internal routing."
+                "Offer one useful next option when appropriate. "
+                "Do not say 'dashboard data', 'system state', 'retained context', 'VOICE_CONTEXT', or expose internal routing."
             )
         elif request.mode == InteractionMode.EXPLAIN:
             mode_rule = (
@@ -224,6 +242,7 @@ class InteractionService:
             f"ACTIVE_EVENT_ID: {event_id or 'none'}\n"
             f"EXPECTED_ROUTE: {route}\n"
             f"RETAINED_CONTEXT: {context.model_dump_json()}\n"
+            f"VOICE_CONTEXT: {_json_context(voice_context)}\n"
             f"RECENT_CONVERSATION:\n{history_text}\n"
             f"USER_QUESTION: {request.message}\n"
             f"{mode_rule} Answer the user's exact question. Clearly separate facts from interpretation. "

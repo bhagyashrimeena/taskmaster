@@ -2,6 +2,7 @@
 
 from datetime import date, datetime
 from enum import StrEnum
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -60,6 +61,7 @@ class ConversationRequest(InteractionModel):
     mode: InteractionMode = InteractionMode.CHAT
     active_story_id: str | None = None
     active_event_id: str | None = None
+    voice_context: Any | None = None
 
 
 class ConversationResponse(InteractionModel):

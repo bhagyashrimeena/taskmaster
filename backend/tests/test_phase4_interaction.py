@@ -80,6 +80,9 @@ async def test_text_voice_and_call_modes_share_the_taskmaster_path() -> None:
     assert [f"MODE: {mode.value}" in prompt for mode, prompt in zip(
         (InteractionMode.TEXT, InteractionMode.VOICE, InteractionMode.CALL), prompts, strict=True
     )] == [True, True, True]
+    assert "VOICE_CONTEXT: none" in prompts[0]
+    assert '"top_holdings"' in prompts[1]
+    assert '"relevant_stories"' in prompts[2]
 
 
 async def test_event_context_separates_facts_interpretation_and_sources() -> None:
