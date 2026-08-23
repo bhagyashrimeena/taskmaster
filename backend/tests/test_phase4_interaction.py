@@ -1,5 +1,5 @@
 import asyncio
-from datetime import date
+from datetime import datetime, timezone
 import re
 
 from fastapi.testclient import TestClient
@@ -12,9 +12,18 @@ from wealth_copilot.day.store import financial_day_store
 from wealth_copilot.agents.taskmaster import root_agent
 from wealth_copilot.api import app
 from wealth_copilot.interaction.context import resolve_surface_context
-from wealth_copilot.interaction.memory import conversation_store, daily_interaction_store
+from wealth_copilot.interaction.memory import (
+    conversation_store,
+    daily_interaction_store,
+    persistent_memory_store,
+)
 from wealth_copilot.interaction.research_jobs import ResearchJobManager
-from wealth_copilot.interaction.schemas import ConversationRequest, InteractionMode, ResearchRequest
+from wealth_copilot.interaction.schemas import (
+    ConversationRequest,
+    InteractionMode,
+    ResearchRequest,
+    SurfaceContext,
+)
 from wealth_copilot.interaction.service import InteractionService
 from wealth_copilot.interaction.service import _grounding_sources
 from wealth_copilot.simulation import simulation_service
@@ -60,6 +69,75 @@ async def test_explain_uses_stable_item_context_and_follow_up_history() -> None:
     assert first.fallback_used is False
     assert second.context.target_id == "hdfc-rbi"
     assert len(conversation_store.get(first.conversation_id).history) == 4
+
+
+async def test_long_term_memory_is_recalled_in_follow_up_prompt() -> None:
+    prompts: list[str] = []
+
+    async def capture(prompt: str, timeout: float):
+        del timeout
+        prompts.append(prompt)
+        return "I remember your earlier context.", ["TaskMaster completed"]
+
+    service = InteractionService(invoker=capture)
+    first = await service.respond(
+        ConversationRequest(
+            message="My name is Tanaya and I prefer concise answers.",
+            mode=InteractionMode.CHAT,
+        )
+    )
+    second = await service.respond(
+        ConversationRequest(
+            conversation_id=first.conversation_id,
+            message="What do you remember about me?",
+            mode=InteractionMode.CHAT,
+        )
+    )
+
+    assert second.conversation_id == first.conversation_id
+    assert "MEMORY_PROFILE:" in prompts[-1]
+    assert "LONG_TERM_MEMORY:" in prompts[-1]
+    assert "User's name is Tanaya." in prompts[-1]
+    assert "User preference: concise answers." in prompts[-1]
+
+
+def test_persistent_memory_store_extracts_and_recalls_user_facts() -> None:
+    persistent_memory_store.remember_exchange(
+        conversation_id="c1",
+        user_message="I live in Mumbai and my goal is to understand portfolio risk better.",
+        assistant_message="I'll keep that in mind.",
+        mode="chat",
+        context=SurfaceContext(
+            target_type="dashboard",
+            title="Today",
+            portfolio_as_of=datetime.now(timezone.utc),
+            source_checkpoint="07:00",
+            facts=["Portfolio context"],
+            interpretation=["Context"],
+            unknowns=["Unknown"],
+            sources=[],
+            portfolio_context="Portfolio value INR 1.00",
+        ),
+    )
+
+    recalled = persistent_memory_store.recall(
+        conversation_id="c1",
+        query="Where am I based and what are my goals?",
+        context=SurfaceContext(
+            target_type="dashboard",
+            title="Today",
+            portfolio_as_of=datetime.now(timezone.utc),
+            source_checkpoint="07:00",
+            facts=["Portfolio context"],
+            interpretation=["Context"],
+            unknowns=["Unknown"],
+            sources=[],
+            portfolio_context="Portfolio value INR 1.00",
+        ),
+    )
+
+    assert any("User goal:" in item.text for item in recalled)
+    assert any("User is based in Mumbai." in item.text for item in recalled)
 
 
 async def test_text_voice_and_call_modes_share_the_taskmaster_path() -> None:

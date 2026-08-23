@@ -15,7 +15,11 @@ from google.genai import types
 from ..agents.taskmaster import root_agent
 from ..config import get_settings
 from .context import resolve_surface_context
-from .memory import conversation_store
+from .memory import (
+    conversation_store,
+    format_recalled_memories,
+    persistent_memory_store,
+)
 from .schemas import (
     ConversationRequest,
     ConversationResponse,
@@ -215,11 +219,23 @@ class InteractionService:
             voice_context = await build_voice_context(conversation_id, request.mode.value)
         history = previous.history[-6:]
         history_text = "\n".join(f"{role}: {text}" for role, text in history) or "None"
+        recalled_memories = persistent_memory_store.recall(
+            conversation_id=conversation_id,
+            query=request.message,
+            context=context,
+        )
+        memory_profile = persistent_memory_store.summary(conversation_id, limit=4)
+        memory_signals = [
+            item.text
+            for item in recalled_memories
+            if item.kind == "fact"
+        ][:3]
         if request.mode == InteractionMode.RESEARCH:
             mode_rule = "You MUST delegate to research_agent exactly once. Return source-first research with exact URLs."
         elif request.mode in {InteractionMode.VOICE, InteractionMode.CALL}:
             mode_rule = (
                 "Use VOICE_CONTEXT and supplied retained context first. If a value is present in VOICE_CONTEXT, answer from it. "
+                "Use LONG_TERM_MEMORY only for durable user preferences, goals, or prior conversational context; never treat it as proof of market facts. "
                 "Resolve follow-ups like 'why does it matter?', 'what about the second one?', or 'is that serious?' from pinned_context, previous_voice_turns, active_cases, and relevant_stories. "
                 "If the needed value is not in context, call the appropriate backend tool/agent or say what is missing. "
                 "Do not invent holdings, prices, sources, events, URLs, or market movements. "
@@ -229,12 +245,17 @@ class InteractionService:
             )
         elif request.mode == InteractionMode.EXPLAIN:
             mode_rule = (
-                "Use only the supplied retained context. Do not call research_agent or refresh/search tools. "
+                "Use the supplied retained context first and LONG_TERM_MEMORY only for prior user-specific preferences or follow-up continuity. "
+                "Do not call research_agent or refresh/search tools. "
                 "Give a concise explanation of at most 140 words without headings or a source list; the UI already "
                 "shows facts, interpretation, uncertainty, and sources separately."
             )
         else:
-            mode_rule = "Use supplied retained context first. Do not call research_agent or refresh/search tools."
+            mode_rule = (
+                "Use supplied retained context first. Use LONG_TERM_MEMORY for past user context, preferences, goals, and prior conversational continuity. "
+                "Do not treat LONG_TERM_MEMORY as authoritative evidence for prices, news, or external facts. "
+                "Do not call research_agent or refresh/search tools."
+            )
         prompt = (
             "DASHBOARD INTERACTION\n"
             f"MODE: {request.mode.value}\n"
@@ -242,6 +263,8 @@ class InteractionService:
             f"ACTIVE_EVENT_ID: {event_id or 'none'}\n"
             f"EXPECTED_ROUTE: {route}\n"
             f"RETAINED_CONTEXT: {context.model_dump_json()}\n"
+            f"MEMORY_PROFILE:\n{memory_profile}\n"
+            f"LONG_TERM_MEMORY:\n{format_recalled_memories(recalled_memories)}\n"
             f"VOICE_CONTEXT: {_json_context(voice_context)}\n"
             f"RECENT_CONVERSATION:\n{history_text}\n"
             f"USER_QUESTION: {request.message}\n"
@@ -273,6 +296,13 @@ class InteractionService:
         answer = _safe_answer(answer)
         conversation_store.append(conversation_id, "user", request.message)
         conversation_store.append(conversation_id, "assistant", answer)
+        persistent_memory_store.remember_exchange(
+            conversation_id=conversation_id,
+            user_message=request.message,
+            assistant_message=answer,
+            mode=request.mode.value,
+            context=context,
+        )
         from ..day.schemas import QuestionAsked
         from ..day.store import financial_day_store
 
@@ -328,6 +358,8 @@ class InteractionService:
                 and settings.news_provider == "google_search"
             ),
             used_existing_context=True,
+            used_long_term_memory=bool(recalled_memories),
+            memory_signals=memory_signals,
             fallback_used=fallback,
             agent_trace=trace,
             created_at=datetime.now(timezone.utc),

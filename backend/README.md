@@ -73,6 +73,17 @@ python -m wealth_copilot.voice.agent start
 
 The browser requests `/api/v1/copilot/voice/session`, joins the short-lived room, and waits for the worker before showing an active call. The worker transcribes speech, delegates each finalized turn to the canonical TaskMaster-backed `InteractionService`, and synthesizes that returned answer. It does not contain an independent financial LLM path. `record=False` disables LiveKit session recording; the existing Copilot conversation memory retains the text turns.
 
+## Copilot long-term memory
+
+Copilot now includes a local SQLite-backed memory layer for user-specific context such as name, goals, preferences, and prior exchanges. Configure it with:
+
+```env
+INTERACTION_MEMORY_DB_PATH=.cache/memory/interaction.db
+INTERACTION_MEMORY_RECALL_LIMIT=6
+```
+
+Memory retrieval is local and lightweight: it uses SQLite plus lexical ranking, not Oracle or an external vector database. The copilot UI shows a `Remembered context used` badge when a reply used recalled memory.
+
 Run a credential-free two-turn TaskMaster adapter check with:
 
 ```powershell

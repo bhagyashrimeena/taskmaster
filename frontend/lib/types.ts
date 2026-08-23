@@ -199,6 +199,8 @@ export interface ConversationResponse {
   suggested_questions: string[];
   used_search: boolean;
   used_existing_context: boolean;
+  used_long_term_memory: boolean;
+  memory_signals: string[];
   fallback_used: boolean;
   agent_trace: string[];
   created_at: string;

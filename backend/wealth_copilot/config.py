@@ -39,6 +39,8 @@ class Settings(BaseSettings):
     interaction_timeout_seconds: float = Field(default=20.0, gt=0, le=120)
     portfolio_interaction_timeout_seconds: float = Field(default=45.0, gt=0, le=180)
     research_timeout_seconds: float = Field(default=90.0, gt=0, le=300)
+    interaction_memory_db_path: str = str(_BACKEND_DIR / ".cache" / "memory" / "interaction.db")
+    interaction_memory_recall_limit: int = Field(default=6, ge=1, le=20)
     tts_model: str = "gemini-3.1-flash-tts-preview"
     tts_voice: str = "Kore"
     tts_language_code: str = "en-IN"

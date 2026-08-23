@@ -247,7 +247,7 @@ async function evaluatePersistenceAndPwa() {
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({
         conversation_id: "polish-conversation", message_id: "polish-answer", mode: "chat", route: "explain",
         answer: "Your portfolio context remains attached across destinations.", context: {}, sources: [], suggested_questions: [],
-        used_search: false, used_existing_context: true, fallback_used: false, agent_trace: [], created_at: new Date().toISOString(),
+        used_search: false, used_existing_context: true, used_long_term_memory: false, memory_signals: [], fallback_used: false, agent_trace: [], created_at: new Date().toISOString(),
       }) });
     });
     await page.goto(new URL("/copilot", baseUrl).href, { waitUntil: "domcontentloaded" });

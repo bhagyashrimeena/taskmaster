@@ -12,6 +12,8 @@ export interface CopilotMessage {
   text: string;
   sources: SourceReference[];
   suggestedQuestions?: string[];
+  usedLongTermMemory?: boolean;
+  memorySignals?: string[];
 }
 
 interface CopilotState {
@@ -61,6 +63,8 @@ export const useCopilotStore = create<CopilotState>()(persist((set, get) => ({
             text: response.answer,
             sources: response.sources,
             suggestedQuestions: response.suggested_questions,
+            usedLongTermMemory: response.used_long_term_memory,
+            memorySignals: response.memory_signals,
           },
         ],
         pending: false,

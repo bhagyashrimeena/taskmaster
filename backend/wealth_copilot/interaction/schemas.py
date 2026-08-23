@@ -75,6 +75,8 @@ class ConversationResponse(InteractionModel):
     suggested_questions: list[str]
     used_search: bool
     used_existing_context: bool
+    used_long_term_memory: bool = False
+    memory_signals: list[str] = Field(default_factory=list)
     fallback_used: bool
     agent_trace: list[str]
     created_at: datetime

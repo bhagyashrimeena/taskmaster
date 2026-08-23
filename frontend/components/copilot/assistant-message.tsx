@@ -89,9 +89,25 @@ export function AssistantMessage({ message }: { message: CopilotMessage }) {
   const sections = headedSections(answer);
   const disclosures = sections.length ? sections : inferredSections(answer);
   const showFullResponse = answer.length > lead.length + 80 && !sections.some((section) => section.label === "Full research");
+  const memorySignals = message.memorySignals?.filter(Boolean).slice(0, 2) ?? [];
 
   return (
     <div className="min-w-0">
+      {message.usedLongTermMemory && (
+        <div className="mb-2 flex flex-wrap items-center gap-2">
+          <span className="inline-flex min-h-8 items-center rounded-full border border-brand/20 bg-brand-soft px-3 text-[10px] font-bold uppercase tracking-[0.14em] text-brand">
+            Remembered context used
+          </span>
+          {memorySignals.map((signal) => (
+            <span
+              key={signal}
+              className="inline-flex min-h-8 items-center rounded-full border border-line bg-background px-3 text-[11px] text-muted"
+            >
+              {signal}
+            </span>
+          ))}
+        </div>
+      )}
       <p data-copilot-answer-lead className="whitespace-pre-wrap text-[15px] leading-7 text-ink">{lead}</p>
       {(disclosures.length > 0 || message.sources.length > 0 || showFullResponse) && (
         <div className="mt-3 divide-y divide-line border-y border-line">

@@ -31,7 +31,7 @@ function reply(message) {
     route: "taskmaster",
     answer: `Your voice question was checked against today’s portfolio context: ${message}`,
     context: {}, sources: [], suggested_questions: ["What should I monitor today?"], used_search: false,
-    used_existing_context: true, fallback_used: false, agent_trace: ["TaskMaster completed"], created_at: new Date().toISOString(),
+    used_existing_context: true, used_long_term_memory: false, memory_signals: [], fallback_used: false, agent_trace: ["TaskMaster completed"], created_at: new Date().toISOString(),
   };
 }
 
