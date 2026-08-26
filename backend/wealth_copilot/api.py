@@ -435,9 +435,20 @@ async def pause_financial_day_clock() -> FinancialDayClockState:
     status_code=202,
 )
 async def restart_financial_day_clock() -> FinancialDayClockState:
-    """Reset today's simulated state and immediately start it from 07:00."""
+    """Reset today's simulated state and pause it at 07:00."""
 
-    return await financial_day_clock.restart_and_play()
+    return await financial_day_clock.restart()
+
+
+@app.post(
+    "/api/v1/day/clock/next",
+    response_model=FinancialDayClockState,
+    status_code=202,
+)
+async def advance_financial_day_clock_to_next() -> FinancialDayClockState:
+    """Run exactly the next pending financial-day checkpoint."""
+
+    return await financial_day_clock.advance_to_next()
 
 
 @app.get("/api/v1/presentation-clock", response_model=PresentationClockState)

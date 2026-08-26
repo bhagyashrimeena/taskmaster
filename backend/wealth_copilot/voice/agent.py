@@ -1,6 +1,7 @@
 """LiveKit voice worker that delegates every answer to the canonical Copilot service."""
 
 from collections.abc import AsyncIterable
+import asyncio
 import json
 import logging
 from uuid import uuid4
@@ -22,6 +23,8 @@ from ..day.store import financial_day_store
 from ..interaction.schemas import ConversationRequest, ConversationResponse, InteractionMode
 from ..interaction.service import InteractionService, interaction_service
 from .context import build_voice_context
+from .orchestrator import StatusSink, VoiceCallOrchestrator
+from .prompting import acknowledgement_for, classify_voice_intent
 
 
 logger = logging.getLogger(__name__)
@@ -61,6 +64,21 @@ def _event_id_for_case(case_id: str | None) -> str | None:
     return match.trigger.event_id if match else None
 
 
+def _call_greeting(context) -> str:
+    if context.active_cases:
+        active_case = context.active_cases[0]
+        subject = active_case.symbol or active_case.title
+        return (
+            "Hi, I’m Wealth Copilot. I have your portfolio and today’s market context open. "
+            f"The main thing on my radar is {subject}, because it moved sharply against your sector exposure. "
+            "What would you like to check first?"
+        )
+    return (
+        "Hi, I’m Wealth Copilot. I have your portfolio and today’s market context open. "
+        "Nothing urgent is flagged right now. We can look at market status, exposure, or what changed today."
+    )
+
+
 class TaskMasterVoiceAgent(Agent):
     """Speech interface over InteractionService; it owns no financial reasoning."""
 
@@ -71,6 +89,7 @@ class TaskMasterVoiceAgent(Agent):
         current_case_id: str | None = None,
         service: InteractionService = interaction_service,
         greet: bool = True,
+        status_sink: StatusSink | None = None,
     ) -> None:
         super().__init__(
             instructions=(
@@ -83,22 +102,27 @@ class TaskMasterVoiceAgent(Agent):
         self._service = service
         self._greet = greet
         self._latest_transcript = ""
+        self._startup_task: asyncio.Task[None] | None = None
+        self._orchestrator = VoiceCallOrchestrator(
+            conversation_id=conversation_id,
+            current_case_id=current_case_id,
+            active_event_id=_event_id_for_case(current_case_id),
+            service=service,
+            status_sink=status_sink,
+        )
 
     async def on_enter(self) -> None:
         if not self._greet:
             return
-        conversation_id = self.conversation_id or uuid4().hex
-        self.conversation_id = conversation_id
+        # Do not block LiveKit's room-ready handshake on network/context I/O.
+        # The SDK has a deliberately short FFI readiness deadline.
+        self._startup_task = asyncio.create_task(self._greet_when_ready())
+
+    async def _greet_when_ready(self) -> None:
         try:
-            context = await build_voice_context(conversation_id, InteractionMode.CALL.value)
-            active_case = context.active_cases[0].title if context.active_cases else None
-            case_line = f" One active case is open: {active_case}." if active_case else " No active case is open."
-            greeting = (
-                f"I have today's portfolio, {context.portfolio.holdings_count} holdings, "
-                f"{context.attention_summary.portfolio_relevant_story_count} relevant stories, "
-                f"and {context.attention_summary.active_case_count} active cases loaded."
-                f"{case_line} What would you like to look at first?"
-            )
+            context = await self._orchestrator.start()
+            self.conversation_id = self._orchestrator.conversation_id
+            greeting = _call_greeting(context)
         except Exception:
             logger.exception("Voice context greeting failed")
             greeting = "You are connected to Wealth Copilot. What would you like to understand?"
@@ -114,6 +138,9 @@ class TaskMasterVoiceAgent(Agent):
         self._latest_transcript = new_message.text_content.strip()
         if not self._latest_transcript:
             raise llm.StopResponse()
+        acknowledgement = acknowledgement_for(classify_voice_intent(self._latest_transcript))
+        if acknowledgement:
+            self.session.say(acknowledgement, allow_interruptions=True, add_to_chat_ctx=False)
 
     async def respond_to_transcript(self, transcript: str) -> ConversationResponse:
         """Route one finalized voice turn through the same TaskMaster conversation."""
@@ -154,8 +181,9 @@ class TaskMasterVoiceAgent(Agent):
         if not transcript:
             return
         self._latest_transcript = ""
-        response = await self.respond_to_transcript(transcript)
-        yield response.answer
+        async for chunk in self._orchestrator.stream_turn(transcript):
+            yield chunk
+        self.conversation_id = self._orchestrator.conversation_id
 
 
 settings = get_settings()
@@ -172,6 +200,12 @@ async def wealth_copilot_voice_session(ctx: JobContext) -> None:
         "day_id": context.get("day_id"),
         "run_id": context.get("run_id"),
     }
+    async def publish_status(event: str, message: str) -> None:
+        payload = json.dumps({"type": "call_status", "event": event, "message": message}, separators=(",", ":"))
+        await ctx.room.local_participant.publish_data(
+            payload.encode("utf-8"), reliable=True, topic="wealth-copilot.call-state"
+        )
+
     session = AgentSession(
         stt=inference.STT(
             model=settings.livekit_stt_model,
@@ -184,14 +218,54 @@ async def wealth_copilot_voice_session(ctx: JobContext) -> None:
         llm=TaskMasterTransportLLM(),
         turn_handling=TurnHandlingOptions(
             turn_detection=inference.TurnDetector(),
+            endpointing={"mode": "dynamic", "min_delay": 0.25, "max_delay": 1.25},
+            interruption={
+                "enabled": True,
+                "mode": "vad",
+                "min_duration": 0.2,
+                "min_words": 1,
+                "resume_false_interruption": False,
+                "false_interruption_timeout": 0.8,
+                "backchannel_boundary": None,
+            },
+            preemptive_generation={"enabled": False},
         ),
+        aec_warmup_duration=0.5,
     )
+    agent = TaskMasterVoiceAgent(
+        conversation_id=context.get("conversation_id"),
+        current_case_id=context.get("current_case_id"),
+        status_sink=publish_status,
+    )
+
+    @session.on("agent_state_changed")
+    def on_agent_state_changed(event) -> None:
+        labels = {
+            "thinking": ("thinking", "Thinking…"),
+            "speaking": ("speaking", "Speaking…"),
+            "listening": ("waiting_for_user", "Listening…"),
+        }
+        status = labels.get(event.new_state)
+        if status:
+            asyncio.create_task(publish_status(*status))
+
+    @session.on("user_state_changed")
+    def on_user_state_changed(event) -> None:
+        if event.new_state == "speaking":
+            if session.agent_state == "speaking":
+                agent._orchestrator.mark_interrupted()
+                asyncio.create_task(publish_status("interrupted", "Interrupted — I’m listening…"))
+            else:
+                asyncio.create_task(publish_status("listening", "Listening…"))
+
+    @session.on("metrics_collected")
+    def on_metrics_collected(event) -> None:
+        metric = event.metrics
+        logger.info("livekit_voice_metric %s", metric.model_dump_json(exclude_none=True))
+
     await session.start(
         room=ctx.room,
-        agent=TaskMasterVoiceAgent(
-            conversation_id=context.get("conversation_id"),
-            current_case_id=context.get("current_case_id"),
-        ),
+        agent=agent,
         record=False,
     )
 

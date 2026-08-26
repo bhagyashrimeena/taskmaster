@@ -61,7 +61,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           })}
         </nav>
         <div className="mt-auto rounded-2xl border border-line bg-background p-4 text-xs leading-5 text-muted">
-          <strong className="block text-ink">{day?.completed_count ?? 0}/{day?.total_count ?? 13} checkpoints</strong>
+          <strong className="block text-ink">{day?.completed_count ?? 0}/{day?.total_count ?? 13} updates complete</strong>
           Financial truth stays in the backend.
         </div>
       </aside>

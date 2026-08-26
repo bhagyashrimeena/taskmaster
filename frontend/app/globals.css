@@ -121,17 +121,21 @@ body:has(.copilot-composer-textarea:focus) .copilot-composer-dock { bottom: calc
 .copilot-mode-switch button { min-height: 44px; border: 0; border-radius: 12px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; color: var(--muted); background: transparent; cursor: pointer; font-size: 11px; font-weight: 700; }.copilot-mode-switch button.is-active { color: var(--green); background: var(--mint); }.copilot-mode-switch button:disabled { opacity: .42; cursor: not-allowed; }
 
 @media (min-width: 768px) {
+  .activity-toast-stack { top: 20px; right: 24px; bottom: auto; left: auto; justify-items: end; }
   .copilot-message-timeline { min-height: 20rem; padding-bottom: 6.5rem; }
   .copilot-composer-dock { position: sticky; right: auto; bottom: 1rem; left: auto; width: calc(100% - 2rem); margin: 1rem auto 0; }
   .copilot-page { padding-bottom: 0; }
 }
 
 @media (max-width: 767px) {
-  .copilot-page-hero { grid-template-columns: 1fr; margin-bottom: 14px; padding: 0; }.copilot-page-hero h1 { font-size: clamp(2.2rem, 11vw, 3.25rem); }.copilot-page-hero > div > p:last-child { margin-top: 10px; font-size: 13px; }.copilot-hero-orb { display: none; }
-  .copilot-agent-card { padding: 17px 15px; border-radius: 19px; }.copilot-agent-card__header { grid-template-columns: 44px minmax(0,1fr) 40px; gap: 10px; }.copilot-agent-card__avatar { width: 44px; height: 44px; }.copilot-agent-card__signal { width: 40px; height: 40px; }.copilot-agent-card__header h2 { font-size: 17px; }
-  .copilot-agent-card__voice { min-height: 76px; margin-top: 14px; padding: 10px 10px 10px 14px; grid-template-columns: minmax(0,1fr) 46px; }.copilot-agent-card__mic { width: 46px; height: 46px; }.voice-state-indicator { grid-template-columns: 1fr auto; gap: 8px; font-size: 12px; }.voice-state-indicator > span { grid-column: 1 / -1; }.voice-waveform { height: 22px; justify-content: flex-start; gap: 3px; }.voice-waveform i { width: 2px; }.voice-state-indicator > svg { align-self: center; }
-  .copilot-agent-card__actions { grid-template-columns: 1fr 1fr; }.copilot-agent-card__actions button { min-height: 56px; padding: 7px 9px; justify-content: flex-start; font-size: 11px; }.copilot-agent-card__button-copy strong { font-size: 10px; }.copilot-agent-card__button-copy small { font-size: 8px; }.copilot-agent-card__mode-note { grid-template-columns: 1fr; gap: 6px; }.copilot-agent-card__mode-note span { min-height: 30px; justify-content: flex-start; text-align: left; }.copilot-agent-card__trust { justify-content: flex-start; }
-  .copilot-prompt-grid { grid-template-columns: 1fr 1fr; }.copilot-prompt-grid button { min-height: 64px; padding: 9px; grid-template-columns: 30px minmax(0,1fr) 14px; gap: 7px; }.copilot-prompt-grid button > span { width: 30px; height: 30px; }.copilot-prompt-grid button strong { font-size: 10px; }
+  .copilot-page { padding-bottom: calc(10rem + env(safe-area-inset-bottom)); }
+  .copilot-page-hero { grid-template-columns: 1fr; margin-bottom: 10px; padding: 0; }.copilot-page-hero h1 { margin-top: 4px; font-size: clamp(2rem, 9.5vw, 2.75rem); line-height: 1; }.copilot-page-hero > div > p:last-child { margin-top: 8px; font-size: 12px; line-height: 1.45; }.copilot-hero-orb { display: none; }
+  .copilot-agent-card { padding: 14px 13px; border-radius: 18px; }.copilot-agent-card__header { grid-template-columns: 38px minmax(0,1fr); gap: 9px; }.copilot-agent-card__avatar { width: 38px; height: 38px; }.copilot-agent-card__signal { display: none; }.copilot-agent-card__header h2 { font-size: 16px; }.copilot-agent-card__header p { font-size: 10px; }
+  .copilot-live-badge { min-height: 21px; padding-inline: 7px; font-size: 8px; }
+  .copilot-agent-card__voice { min-height: 60px; margin-top: 10px; padding: 8px 8px 8px 12px; border-radius: 16px; grid-template-columns: minmax(0,1fr) 44px; }.copilot-agent-card__mic { width: 44px; height: 44px; }.voice-state-indicator { grid-template-columns: 1fr auto; gap: 6px; font-size: 11px; }.voice-state-indicator > span { grid-column: 1 / -1; }.voice-waveform { height: 16px; justify-content: flex-start; gap: 3px; overflow: hidden; }.voice-waveform i { width: 2px; }.voice-state-indicator > svg { align-self: center; }
+  .copilot-agent-card__actions { margin-top: 10px; grid-template-columns: 1fr 1fr; gap: 8px; }.copilot-agent-card__actions button { min-height: 50px; padding: 7px 9px; justify-content: flex-start; font-size: 11px; border-radius: 15px; }.copilot-agent-card__button-copy strong { font-size: 10px; }.copilot-agent-card__button-copy small { font-size: 8px; }.copilot-agent-card__mode-note { display: none; }.copilot-agent-card__trust { margin-top: 9px; justify-content: flex-start; font-size: 9px; }.copilot-agent-card__boundary { display: none; }.copilot-agent-card__notices { margin-top: 8px; padding-top: 8px; }
+  .copilot-context-block { margin-top: 12px; gap: 12px; }
+  .copilot-prompt-grid { grid-template-columns: 1fr 1fr; gap: 8px; }.copilot-prompt-grid button { min-height: 54px; padding: 8px; grid-template-columns: 28px minmax(0,1fr) 12px; gap: 6px; }.copilot-prompt-grid button > span { width: 28px; height: 28px; }.copilot-prompt-grid button strong { font-size: 9px; line-height: 1.3; }
   .copilot-context-card dl > div { padding: 0 7px; }.copilot-context-card dt { align-items: flex-start; flex-direction: column; gap: 5px; }.copilot-context-card dt > span:first-child { width: 30px; height: 30px; flex-basis: 30px; }.copilot-context-card dd { margin: 7px 0 0; font-size: 18px; }.copilot-context-card__heading > span { width: 100%; }
   .copilot-mode-switch button { font-size: 9px; }
 }
@@ -333,6 +337,18 @@ footer { margin-top: 60px; padding: 24px 0 6px; border-top: 1px solid var(--line
 .toast--attention span { color: #72563a; font-size: 10px; line-height: 1.45; }
 .toast--attention a { align-self: center; padding: 7px 10px; border-radius: 8px; color: white; background: var(--amber); font-size: 9px; font-weight: 850; text-decoration: none; }
 .toast--attention button { margin: -6px -8px 0 0; padding: 4px; border: 0; color: #866b50; background: transparent; cursor: pointer; font-size: 17px; line-height: 1; }
+.activity-toast-stack { position: fixed; top: calc(4.5rem + env(safe-area-inset-top)); right: 12px; bottom: auto; left: 12px; z-index: 72; display: grid; justify-items: center; pointer-events: none; }
+.activity-toast { width: min(430px, 100%); min-height: 74px; padding: 12px; border: 1px solid var(--line); border-radius: 18px; display: grid; grid-template-columns: 38px minmax(0,1fr) 36px; gap: 11px; align-items: start; color: var(--ink); background: rgba(255,255,255,.98); box-shadow: 0 18px 52px rgba(18,39,30,.18); pointer-events: auto; animation: activity-toast-in .22s ease-out; }
+.activity-toast__icon { width: 38px; height: 38px; border-radius: 14px; display: grid; place-items: center; color: var(--brand); background: var(--mint); }
+.activity-toast strong { display: block; color: var(--ink); font-size: 12px; line-height: 1.35; }
+.activity-toast p { margin: 3px 0 0; color: var(--muted); font-size: 10px; line-height: 1.45; }
+.activity-toast button:not(.activity-toast__close) { min-height: 34px; margin-top: 8px; padding: 0 10px; border: 0; border-radius: 10px; color: white; background: var(--green); cursor: pointer; font-size: 9px; font-weight: 850; }
+.activity-toast__close { width: 36px; height: 36px; border: 0; border-radius: 12px; display: grid; place-items: center; color: var(--muted); background: transparent; cursor: pointer; }
+.activity-toast__close:hover { background: var(--background); }
+.activity-toast--success { border-color: #b9ddcb; background: #f5fbf7; }.activity-toast--success .activity-toast__icon { color: #0f7650; background: #ddefe6; }
+.activity-toast--alert { border-color: #e7c58e; background: #fff8ec; }.activity-toast--alert .activity-toast__icon { color: var(--amber); background: #f7ead4; }.activity-toast--alert button:not(.activity-toast__close) { background: var(--amber); }
+@keyframes activity-toast-in { from { opacity: 0; transform: translateY(-12px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@media (min-width: 768px) { .activity-toast-stack { top: 20px; right: 24px; left: auto; justify-items: end; } }
 
 .copilot-overlay { position: fixed; inset: 0; z-index: 80; display: flex; justify-content: flex-end; background: rgba(16,30,24,.32); backdrop-filter: blur(3px); animation: fade-in .2s ease-out; }
 .copilot-dock { position: fixed; right: 24px; bottom: 24px; z-index: 85; max-width: calc(100vw - 24px); display: flex; justify-content: flex-end; }

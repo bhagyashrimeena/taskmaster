@@ -14,6 +14,7 @@ export interface CopilotMessage {
   suggestedQuestions?: string[];
   usedLongTermMemory?: boolean;
   memorySignals?: string[];
+  mode?: InteractionMode;
 }
 
 interface CopilotState {
@@ -41,6 +42,7 @@ export const useCopilotStore = create<CopilotState>()(persist((set, get) => ({
       text: trimmed,
       sources: [],
       suggestedQuestions: [],
+      mode,
     };
     set((state) => ({
       messages: [...state.messages, userMessage],
@@ -65,6 +67,7 @@ export const useCopilotStore = create<CopilotState>()(persist((set, get) => ({
             suggestedQuestions: response.suggested_questions,
             usedLongTermMemory: response.used_long_term_memory,
             memorySignals: response.memory_signals,
+            mode,
           },
         ],
         pending: false,
@@ -74,11 +77,27 @@ export const useCopilotStore = create<CopilotState>()(persist((set, get) => ({
     }
   },
   adoptConversation: (conversationId) => set({ conversationId }),
-  appendCallTranscript: (message) => set((state) => ({
-    messages: state.messages.some((item) => item.id === message.id)
-      ? state.messages
-      : [...state.messages, message],
-  })),
+  appendCallTranscript: (message) => set((state) => {
+    const callMessage = { ...message, mode: "call" as const };
+    const existingIndex = state.messages.findIndex((item) => item.id === message.id);
+    if (existingIndex >= 0) {
+      const messages = [...state.messages];
+      messages[existingIndex] = callMessage;
+      return { messages };
+    }
+    const last = state.messages.at(-1);
+    if (last?.mode === "call" && last.role === callMessage.role) {
+      const text = callMessage.text.trim();
+      if (!text || last.text.includes(text)) return {};
+      return {
+        messages: [
+          ...state.messages.slice(0, -1),
+          { ...last, text: `${last.text.trim()} ${text}`.replace(/\s+/g, " ") },
+        ],
+      };
+    }
+    return { messages: [...state.messages, callMessage] };
+  }),
   clear: () => set({ conversationId: null, messages: [], pending: false, error: null }),
 }), {
   name: "wealth-copilot-conversation-v2",

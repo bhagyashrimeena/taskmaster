@@ -15,7 +15,8 @@
     "test:e2e:product": "node scripts/real-product-user-evaluation.mjs",
     "test:e2e:polish": "node scripts/ui-ux-final-polish.mjs",
     "test:e2e": "node scripts/financial-day-browser-smoke.mjs",
-    "test:e2e:audio": "node scripts/gemini-audio-browser-smoke.mjs"
+    "test:e2e:audio": "node scripts/gemini-audio-browser-smoke.mjs",
+    "test:e2e:activity": "node scripts/activity-toast-browser-smoke.mjs"
   },
   "dependencies": {
     "@radix-ui/react-slot": "^1.3.3",

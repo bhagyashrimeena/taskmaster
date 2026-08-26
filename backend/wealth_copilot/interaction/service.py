@@ -1,6 +1,7 @@
 """TaskMaster-backed conversational service with fast context fallback."""
 
 import asyncio
+from collections.abc import AsyncIterator
 from datetime import datetime, timezone
 import json
 import logging
@@ -10,6 +11,7 @@ from urllib.parse import urlsplit
 from uuid import uuid4
 
 from google.adk.runners import InMemoryRunner
+from google.adk.agents.run_config import RunConfig, StreamingMode
 from google.genai import types
 
 from ..agents.taskmaster import root_agent
@@ -202,6 +204,146 @@ class InteractionService:
         finally:
             await runner.close()
 
+    @staticmethod
+    async def _stream_taskmaster(prompt: str, timeout_seconds: float) -> AsyncIterator[str]:
+        """Stream the canonical TaskMaster's text events without duplicating final output."""
+
+        session_id = uuid4().hex
+        app_name = "agents"
+        runner = InMemoryRunner(agent=root_agent, app_name=app_name)
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout_seconds
+        saw_partial_text = False
+        try:
+            await runner.session_service.create_session(
+                app_name=app_name, user_id="dashboard-user", session_id=session_id
+            )
+            events = runner.run_async(
+                user_id="dashboard-user",
+                session_id=session_id,
+                new_message=types.Content(role="user", parts=[types.Part(text=prompt)]),
+                run_config=RunConfig(streaming_mode=StreamingMode.SSE),
+            ).__aiter__()
+            while True:
+                remaining = deadline - loop.time()
+                if remaining <= 0:
+                    raise TimeoutError("TaskMaster voice stream timed out")
+                try:
+                    event = await asyncio.wait_for(anext(events), timeout=remaining)
+                except StopAsyncIteration:
+                    break
+                if event.author != "taskmaster" or not event.content:
+                    continue
+                parts = event.content.parts or []
+                if any(getattr(part, "function_call", None) for part in parts):
+                    continue
+                text = "".join(part.text or "" for part in parts)
+                if not text:
+                    continue
+                if event.partial:
+                    saw_partial_text = True
+                    yield text
+                elif event.is_final_response() and not saw_partial_text:
+                    yield text
+        finally:
+            await runner.close()
+
+    async def stream_voice(self, request: ConversationRequest, *, intent) -> AsyncIterator[str]:
+        """Stream a short call answer through TaskMaster and persist the shared conversation."""
+
+        from ..voice.context import build_voice_context
+        from ..voice.llm import voice_presentation_llm
+        from ..voice.prompting import VoiceIntent, build_live_call_prompt, complete_sentences
+
+        conversation_id = request.conversation_id or uuid4().hex
+        voice_context = request.voice_context or await build_voice_context(
+            conversation_id, InteractionMode.CALL.value
+        )
+        previous = conversation_store.get(conversation_id)
+        story_id = request.active_story_id or previous.active_story_id
+        event_id = request.active_event_id or previous.active_event_id
+        conversation_store.update_context(
+            conversation_id, story_id=story_id, event_id=event_id
+        )
+        surface_context = await resolve_surface_context(story_id=story_id, event_id=event_id)
+        prompt = build_live_call_prompt(request.message, voice_context, intent)
+        buffer = ""
+        spoken: list[str] = []
+        words_used = 0
+        stream = (
+            self._stream_taskmaster(prompt, settings.research_timeout_seconds)
+            if intent == VoiceIntent.DEEP_RESEARCH
+            else voice_presentation_llm.stream(prompt)
+        )
+        fallback = False
+        try:
+            async for raw_chunk in stream:
+                buffer += raw_chunk
+                sentences, buffer = complete_sentences(buffer)
+                for sentence in sentences:
+                    safe_sentence = _safe_answer(sentence)
+                    remaining_words = 65 - words_used
+                    if remaining_words <= 0 or len(spoken) >= 3:
+                        break
+                    words = safe_sentence.split()
+                    if len(words) > remaining_words:
+                        safe_sentence = " ".join(words[:remaining_words]).rstrip(" ,;:") + "."
+                    spoken.append(safe_sentence)
+                    words_used += len(safe_sentence.split())
+                    yield safe_sentence + " "
+                if words_used >= 65 or len(spoken) >= 3:
+                    break
+        except Exception as exc:
+            logger.exception("TaskMaster voice stream failed")
+            fallback = True
+            if not spoken:
+                buffer = _fallback_answer(surface_context, InteractionMode.CALL)
+        finally:
+            await stream.aclose()
+
+        if buffer and words_used < 65 and len(spoken) < 3:
+            sentences, _ = complete_sentences(buffer, final=True)
+            for sentence in sentences[: 3 - len(spoken)]:
+                safe_sentence = _safe_answer(sentence)
+                remaining_words = 65 - words_used
+                if remaining_words <= 0:
+                    break
+                words = safe_sentence.split()
+                if len(words) > remaining_words:
+                    safe_sentence = " ".join(words[:remaining_words]).rstrip(" ,;:") + "."
+                spoken.append(safe_sentence)
+                words_used += len(safe_sentence.split())
+                yield safe_sentence + " "
+
+        answer = " ".join(spoken).strip()
+        if not answer:
+            answer = "I’m sorry, I couldn’t form a reliable answer from the current context. Could you try that once more?"
+            yield answer
+            fallback = True
+        conversation_store.append(conversation_id, "user", request.message)
+        conversation_store.append(conversation_id, "assistant", answer)
+        persistent_memory_store.remember_exchange(
+            conversation_id=conversation_id,
+            user_message=request.message,
+            assistant_message=answer,
+            mode=InteractionMode.CALL.value,
+            context=surface_context,
+        )
+        from ..day.schemas import QuestionAsked
+        from ..day.store import financial_day_store
+
+        financial_day_store.update(
+            lambda state: state.questions_asked.append(
+                QuestionAsked(question=request.message, story_id=story_id, event_id=event_id)
+            )
+        )
+        logger.info(
+            "TaskMaster voice stream completed intent=%s words=%d fallback=%s",
+            getattr(intent, "value", str(intent)),
+            len(answer.split()),
+            fallback,
+        )
+
     async def respond(self, request: ConversationRequest) -> ConversationResponse:
         conversation_id = request.conversation_id or uuid4().hex
         previous = conversation_store.get(conversation_id)
@@ -268,7 +410,8 @@ class InteractionService:
             f"VOICE_CONTEXT: {_json_context(voice_context)}\n"
             f"RECENT_CONVERSATION:\n{history_text}\n"
             f"USER_QUESTION: {request.message}\n"
-            f"{mode_rule} Answer the user's exact question. Clearly separate facts from interpretation. "
+            f"{mode_rule} Answer the user's exact question in consumer-friendly plain sentences. "
+            "Keep facts and interpretation clear without scaffold labels like 'Facts', 'Interpretation', 'Relevance & Interpretation', or 'Dashboard context'. "
             "Explain relevance without giving investment instructions or price predictions."
         )
         timeout = (

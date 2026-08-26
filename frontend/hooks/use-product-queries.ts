@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
+  advanceFinancialDayClock,
   getAlert,
   getAlerts,
   getCopilotBootstrap,
@@ -64,11 +65,13 @@ export function useFinancialDayClockControls() {
   const start = useMutation({ mutationFn: startFinancialDayClock, ...options });
   const pause = useMutation({ mutationFn: pauseFinancialDayClock, ...options });
   const restart = useMutation({ mutationFn: restartFinancialDayClock, ...options });
+  const advance = useMutation({ mutationFn: advanceFinancialDayClock, ...options });
   return {
+    advance,
     start,
     pause,
     restart,
-    pending: start.isPending || pause.isPending || restart.isPending,
+    pending: start.isPending || pause.isPending || restart.isPending || advance.isPending,
   };
 }
 

@@ -64,13 +64,13 @@ export function TimelineView() {
           <div>
             <p className="section-kicker section-kicker--dark">Today</p>
             <h2 id="timeline-progress" className="mt-2 text-2xl font-semibold tracking-tight md:text-3xl">
-              {data.completed_count} of {data.total_count} checkpoints complete
+              {data.completed_count} of {data.total_count} updates complete
             </h2>
-            <p className="mt-2 text-sm text-white/65">Your financial day updates automatically as each checkpoint finishes.</p>
+            <p className="mt-2 text-sm text-white/65">Run one update at a time, or play the remaining financial day.</p>
           </div>
           {data.next_checkpoint && (
             <div className="min-w-48 rounded-xl border border-white/10 bg-white/7 px-4 py-3 text-sm">
-              <span className="block text-[10px] font-bold tracking-wider text-white/50 uppercase">Next checkpoint</span>
+              <span className="block text-[10px] font-bold tracking-wider text-white/50 uppercase">Next update</span>
               <strong className="mt-1 block">{data.next_checkpoint.scheduled_time} · {data.next_checkpoint.label}</strong>
             </div>
           )}
@@ -80,7 +80,7 @@ export function TimelineView() {
 
       <div className="grid gap-4 lg:grid-cols-[1fr_0.72fr]">
         <section className="product-card p-5 md:p-6" aria-labelledby="checkpoints-heading">
-          <h2 id="checkpoints-heading" className="section-title mb-5">Today’s checkpoints</h2>
+          <h2 id="checkpoints-heading" className="section-title mb-5">Today’s updates</h2>
           <ol className="relative grid gap-0">
             {data.timeline.map((step, index) => {
               const display = CHECKPOINT_DISPLAYS[step.step_id] ?? DEFAULT_DISPLAY;

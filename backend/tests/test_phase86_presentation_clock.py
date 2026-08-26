@@ -1,6 +1,7 @@
 """Phase 8.6 accelerated clock, idempotency, and API contract tests."""
 
 import asyncio
+import time
 from datetime import date, datetime, timezone
 from pathlib import Path
 
@@ -138,6 +139,28 @@ def test_presentation_clock_api_is_separate_from_normal_day_api() -> None:
         canonical = client.get("/api/v1/day/clock")
         assert canonical.status_code == 200
         assert canonical.json() == paused.json()
+
+
+def test_canonical_restart_pauses_and_next_runs_one_checkpoint() -> None:
+    with TestClient(app) as client:
+        restarted = client.post("/api/v1/day/clock/restart")
+        assert restarted.status_code == 202
+        assert restarted.json()["status"] == "paused"
+        assert restarted.json()["current_time"] == "07:00"
+        assert restarted.json()["completed_checkpoint_ids"] == []
+
+        advanced = client.post("/api/v1/day/clock/next")
+        assert advanced.status_code == 202
+
+        deadline = time.monotonic() + 5
+        state = advanced.json()
+        while state["status"] == "running" and time.monotonic() < deadline:
+            time.sleep(0.02)
+            state = client.get("/api/v1/day/clock").json()
+
+        assert state["status"] == "paused"
+        assert state["completed_checkpoint_ids"] == ["morning"]
+        assert state["next_checkpoint"] == "08:00"
 
 
 @pytest.mark.asyncio

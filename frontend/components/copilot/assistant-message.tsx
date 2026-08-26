@@ -2,12 +2,15 @@ import { ChevronRight, ExternalLink } from "lucide-react";
 
 import type { CopilotMessage } from "@/stores/copilot-store";
 
-const INTERNAL_LEAD = /^(?:based on (?:the )?(?:current )?(?:dashboard data|available data|portfolio data|financial-day context)(?: and (?:the )?system state)?|from the current dashboard data and system state)[^.!?]*[.!?]\s*/i;
+const INTERNAL_LEAD = /^(?:based on [^.!?:\n]*(?:dashboard|system state|retained context|available data|portfolio data|financial-day context)[^.!?:\n]*[:.!?]|from the current dashboard data and system state[^.!?]*[.!?])\s*/i;
 const SECTION_HEADING = /^(why this matters|verified facts|the facts|portfolio impact|portfolio status|evidence|full research|research)\s*:?[\s]*$/i;
 
 function cleanAnswer(value: string) {
   const withoutLead = value.trim().replace(/\r/g, "").replace(INTERNAL_LEAD, "");
   return withoutLead
+    .replace(/\bthe\s+(?:interpretation|relevance)\s*\(\s*why this matters(?: to you)?\s*\)\s*:?/gi, "\nWhy this matters\n")
+    .replace(/^\s*(?:facts\s*[/:+&-]?\s*interpretation|facts\s+interpretation)(?:\s*\([^)]*\))?\s*[:\-–—]?\s*/i, "")
+    .replace(/\b(?:relevance\s*&\s*interpretation|interpretation\s*&\s*relevance)\b\s*[:\-–—]?\s*/gi, "")
     .replace(/^\s*(?:the facts|portfolio status)\s*[•:\-]\s*/i, "")
     .replace(/^#{1,6}\s*/gm, "")
     .replace(/\*\*([^*]+)\*\*/g, "$1")
@@ -18,7 +21,8 @@ function cleanAnswer(value: string) {
 }
 
 function conciseLead(answer: string) {
-  const summaryText = answer
+  const leadSource = answer.split(/\n?\s*(?:the\s+)?(?:[•]\s*)?(?:why this matters(?: to you)?|verified facts|portfolio impact|(?:interpretation|relevance)\s*\(\s*why this matters(?: to you)?\s*\))\s*:?/i)[0] ?? answer;
+  const summaryText = leadSource
     .split("\n")
     .filter((line) => !SECTION_HEADING.test(line.trim()) && !line.trim().startsWith("•"))
     .join(" ")
@@ -90,6 +94,10 @@ export function AssistantMessage({ message }: { message: CopilotMessage }) {
   const disclosures = sections.length ? sections : inferredSections(answer);
   const showFullResponse = answer.length > lead.length + 80 && !sections.some((section) => section.label === "Full research");
   const memorySignals = message.memorySignals?.filter(Boolean).slice(0, 2) ?? [];
+
+  if (message.mode === "call") {
+    return <p data-copilot-answer-lead className="whitespace-pre-wrap text-[15px] leading-7 text-ink">{lead}</p>;
+  }
 
   return (
     <div className="min-w-0">

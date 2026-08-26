@@ -55,7 +55,7 @@ export function CopilotView() {
     setComposerMode("voice");
   }, []);
   const handleCallTranscript = useCallback((message: { id: string; role: "user" | "assistant"; text: string }) => {
-    appendCallTranscript({ ...message, sources: [], suggestedQuestions: [] });
+    appendCallTranscript({ ...message, sources: [], suggestedQuestions: [], mode: "call" });
   }, [appendCallTranscript]);
   const voice = useVoiceInput({ onTranscript: handleTranscript, onStateChange: setAgentState });
   const call = useLiveKitSession({
@@ -159,7 +159,7 @@ export function CopilotView() {
         onToggleMute={() => void call.toggleMute()}
       />
 
-      <div className="mt-5 grid gap-4 lg:grid-cols-[1.2fr_.8fr]">
+      <div className="copilot-context-block mt-5 grid gap-4 lg:grid-cols-[1.2fr_.8fr]">
         <CopilotSuggestedPrompts prompts={empty ? suggestions : followUps} pending={pending} onSelect={(prompt) => void sendAgentMessage(prompt, prompt.toLowerCase().includes("research") ? "research" : "text")} />
         <CopilotContextSummary
           holdings={bootstrap.data?.holdings_count}

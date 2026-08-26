@@ -36,6 +36,7 @@ export const getFinancialDayClock = () => getJson<FinancialDayClockState>("/day/
 export const startFinancialDayClock = () => postJson<FinancialDayClockState>("/day/clock/start");
 export const pauseFinancialDayClock = () => postJson<FinancialDayClockState>("/day/clock/pause");
 export const restartFinancialDayClock = () => postJson<FinancialDayClockState>("/day/clock/restart");
+export const advanceFinancialDayClock = () => postJson<FinancialDayClockState>("/day/clock/next");
 export const getAlert = (caseId: string) => getJson<AlertDetailResponse>(`/alerts/${caseId}`);
 export const getCopilotBootstrap = (conversationId?: string | null) =>
   getJson<CopilotBootstrapResponse>(

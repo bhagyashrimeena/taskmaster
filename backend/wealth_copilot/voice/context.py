@@ -105,6 +105,7 @@ async def build_voice_context(conversation_id: str, mode: str = "call") -> Voice
     dashboard = await dashboard_service.get_dashboard()
     day = financial_day_store.get(application_today())
     portfolio = dashboard.portfolio
+    day_performance = next((item for item in portfolio.performance if item.period == "1D"), None)
     top_holdings = portfolio.largest_holdings[:5]
     largest = top_holdings[0] if top_holdings else None
     top_three_concentration = round(sum(item.portfolio_weight for item in top_holdings[:3]), 2)
@@ -183,6 +184,8 @@ async def build_voice_context(conversation_id: str, mode: str = "call") -> Voice
             today_change_percent=portfolio.day_change_pct,
             overall_gain_amount=portfolio.unrealized_pnl,
             overall_gain_percent=portfolio.overall_return_pct,
+            benchmark_change_percent=day_performance.benchmark_return_pct if day_performance else None,
+            benchmark_label=day_performance.benchmark_label if day_performance else None,
             holdings_count=portfolio.holdings_count,
             top_holdings=[
                 VoiceHoldingContext(

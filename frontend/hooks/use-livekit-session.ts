@@ -6,6 +6,21 @@ import type { Room } from "livekit-client";
 import { createVoiceSession } from "@/lib/api/product";
 import type { VoiceAgentState } from "@/hooks/use-voice-input";
 
+type CallStatusEvent = {
+  type: "call_status";
+  event: string;
+  message: string;
+};
+
+function stateForCallEvent(event: string): VoiceAgentState {
+  if (event === "listening" || event === "interrupted") return "listening";
+  if (event === "researching_sources") return "researching";
+  if (event === "tts_stream_started" || event === "speaking") return "speaking";
+  if (event === "waiting_for_user" || event === "call_started") return "callActive";
+  if (event === "error") return "error";
+  return "processing";
+}
+
 export function useLiveKitSession({
   conversationId,
   enabled,
@@ -77,6 +92,20 @@ export function useLiveKitSession({
       room.on(RoomEvent.ActiveSpeakersChanged, (speakers) => {
         const remoteSpeaking = speakers.some((participant) => participant.identity !== room.localParticipant.identity);
         onStateChange(remoteSpeaking ? "speaking" : "callActive");
+      });
+      room.on(RoomEvent.DataReceived, (payload, _participant, _kind, topic) => {
+        if (topic !== "wealth-copilot.call-state") return;
+        try {
+          const event = JSON.parse(new TextDecoder().decode(payload)) as CallStatusEvent;
+          if (event.type !== "call_status" || !event.message) return;
+          setMessage(event.message);
+          onStateChange(stateForCallEvent(event.event));
+          if (process.env.NODE_ENV === "development" && event.event.startsWith("latency_")) {
+            console.debug("Wealth Copilot voice latency", event);
+          }
+        } catch {
+          // Ignore malformed participant data while keeping the call connected.
+        }
       });
       room.on(RoomEvent.TranscriptionReceived, (segments, participant) => {
         const role = participant?.identity === room.localParticipant.identity ? "user" : "assistant";

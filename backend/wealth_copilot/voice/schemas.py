@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class VoiceModel(BaseModel):
@@ -44,6 +44,8 @@ class VoicePortfolioContext(VoiceModel):
     today_change_percent: float | None = None
     overall_gain_amount: float | None = None
     overall_gain_percent: float | None = None
+    benchmark_change_percent: float | None = None
+    benchmark_label: str | None = None
     holdings_count: int
     top_holdings: list[VoiceHoldingContext]
     sector_exposure: list[VoiceSectorContext]
@@ -112,6 +114,10 @@ class VoicePinnedContext(VoiceModel):
     last_discussed_symbol: str | None = None
     last_discussed_case_id: str | None = None
     last_user_intent: str | None = None
+    last_market_question: str | None = None
+    last_listed_items: list[str] = Field(default_factory=list)
+    last_answer_summary: str | None = None
+    interrupted_turn_summary: str | None = None
 
 
 class VoiceContext(VoiceModel):

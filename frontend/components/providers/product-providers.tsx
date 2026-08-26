@@ -1,14 +1,36 @@
 "use client";
 
 import { QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/react-query";
-import { BellRing, X } from "lucide-react";
+import { BellRing, CheckCircle2, Info, Volume2, X } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { getAlerts, productEventStreamUrl } from "@/lib/api/product";
 import type { ProductEvent } from "@/lib/product-types";
+import type { FinancialDayClockState } from "@/lib/types";
 import { productKeys } from "@/lib/queries/keys";
 import { useUiStore } from "@/stores/ui-store";
+import { useFinancialDayClock } from "@/hooks/use-product-queries";
+
+const checkpointNotices: Record<string, {
+  title: string;
+  detail: string;
+  actionLabel: string;
+  actionHref: string;
+}> = {
+  morning: { title: "Morning brief is ready", detail: "Your portfolio-aware morning briefing is ready to review.", actionLabel: "View Today", actionHref: "/" },
+  health: { title: "Portfolio health check is ready", detail: "Your latest exposure and concentration check is ready.", actionLabel: "View Portfolio", actionHref: "/portfolio" },
+  open: { title: "Market open update is ready", detail: "See how the market open affected your holdings.", actionLabel: "View Today", actionHref: "/" },
+  watch: { title: "Market watch updated", detail: "Your latest portfolio-relevant market scan is ready.", actionLabel: "View Timeline", actionHref: "/timeline" },
+  sector: { title: "Sector exposure insight is ready", detail: "Your sector concentration view has been refreshed.", actionLabel: "View Portfolio", actionHref: "/portfolio" },
+  learning: { title: "Portfolio learning is ready", detail: "A new insight based on your holdings is ready.", actionLabel: "View Portfolio", actionHref: "/portfolio" },
+  close: { title: "Market close review is ready", detail: "See what changed across your portfolio today.", actionLabel: "View Today", actionHref: "/" },
+  intelligence: { title: "Portfolio insight is ready", detail: "Your portfolio intelligence summary has been refreshed.", actionLabel: "View Portfolio", actionHref: "/portfolio" },
+  actions: { title: "Action list is ready", detail: "Review what may deserve your attention next.", actionLabel: "View Timeline", actionHref: "/timeline" },
+  evening: { title: "Evening wealth wrap is ready", detail: "Your end-of-day portfolio summary is ready.", actionLabel: "View Today", actionHref: "/" },
+  tomorrow: { title: "Tomorrow’s watchlist is ready", detail: "Review events that could affect your holdings tomorrow.", actionLabel: "View Timeline", actionHref: "/timeline" },
+  story: { title: "Daily wealth story is ready", detail: "Replay the events that shaped your portfolio today.", actionLabel: "View recap", actionHref: "/timeline" },
+};
 
 const seenAlertKey = "wealth-copilot-seen-alerts-v1";
 
@@ -32,7 +54,7 @@ function rememberAlert(id: string) {
 
 function ProductEventBridge() {
   const queryClient = useQueryClient();
-  const showProactiveAlert = useUiStore((state) => state.showProactiveAlert);
+  const showActivityToast = useUiStore((state) => state.showActivityToast);
 
   useEffect(() => {
     const source = new EventSource(productEventStreamUrl);
@@ -59,51 +81,132 @@ function ProductEventBridge() {
             rememberAlert(seenId);
             void getAlerts().then((inbox) => {
               const item = inbox.items.find((candidate) => candidate.event_id === event.entity_id);
-              if (!item) return;
-              showProactiveAlert({
-                eventId: item.event_id,
-                caseId: item.case_id,
-                title: item.company ?? item.instrument ?? "Portfolio event",
-                summary: item.reason,
+              showActivityToast({
+                id: `${event.run_id}:alert-created:${event.entity_id}`,
+                tone: "alert",
+                title: item ? `${item.company ?? item.instrument ?? "Portfolio"} needs attention` : "Portfolio alert needs attention",
+                detail: item?.reason ?? "A portfolio-relevant event crossed your attention rules.",
+                actionLabel: "Review alert",
+                actionHref: item?.case_id ? `/alerts/${item.case_id}` : "/alerts",
+                durationMs: 12_000,
               });
-            }).catch(() => undefined);
+            }).catch(() => showActivityToast({
+              id: `${event.run_id}:alert-created:${event.entity_id}`,
+              tone: "alert",
+              title: "Portfolio alert needs attention",
+              detail: "A portfolio-relevant event crossed your attention rules.",
+              actionLabel: "Review alerts",
+              actionHref: "/alerts",
+              durationMs: 12_000,
+            }));
           }
         }
       } else if (event.event_type === "AUDIO_READY") {
         void queryClient.invalidateQueries({ queryKey: productKeys.today });
+        showActivityToast({
+          id: `${event.run_id}:audio-ready:${event.entity_id ?? "brief"}`,
+          tone: "success",
+          title: "Audio brief ready",
+          detail: "A generated audio recap is available on Today.",
+          actionLabel: "Open Today",
+          actionHref: "/",
+          durationMs: 7_000,
+        });
       }
     };
     ["SNAPSHOT", "CHECKPOINT_COMPLETED", "EVENT_ALERT_CREATED", "FINANCIAL_CASE_UPDATED", "AUDIO_READY"].forEach(
       (name) => source.addEventListener(name, refresh as EventListener),
     );
     return () => source.close();
-  }, [queryClient, showProactiveAlert]);
+  }, [queryClient, showActivityToast]);
 
   return null;
 }
 
-function ProactiveAlertToast() {
+function clockToastForStatus(previous: FinancialDayClockState | null, current: FinancialDayClockState) {
+  if (!previous) return null;
+  if (previous.status === current.status) return null;
+  if (current.status === "failed") {
+    return {
+      id: `${current.trading_date}:clock-failed:${current.current_time}`,
+      tone: "alert" as const,
+      title: "Financial day paused safely",
+      detail: current.message,
+      actionLabel: "Check Timeline",
+      actionHref: "/timeline",
+    };
+  }
+  return null;
+}
+
+function ClockActivityNotifier() {
+  const clock = useFinancialDayClock();
+  const showActivityToast = useUiStore((state) => state.showActivityToast);
+  const previous = useRef<FinancialDayClockState | null>(null);
+
+  useEffect(() => {
+    const current = clock.data;
+    if (!current) return;
+    const statusToast = clockToastForStatus(previous.current, current);
+    if (statusToast) showActivityToast(statusToast);
+    if (previous.current) {
+      const priorCompleted = new Set(previous.current.completed_checkpoint_ids);
+      for (const stepId of current.completed_checkpoint_ids) {
+        if (priorCompleted.has(stepId) || stepId === "event") continue;
+        const notice = checkpointNotices[stepId];
+        if (!notice) continue;
+        showActivityToast({
+          id: `${current.trading_date}:checkpoint-complete:${stepId}`,
+          tone: "success",
+          ...notice,
+          durationMs: 6_000,
+        });
+      }
+    }
+    previous.current = current;
+  }, [clock.data, showActivityToast]);
+
+  return null;
+}
+
+function ActivityToastStack() {
   const router = useRouter();
-  const notice = useUiStore((state) => state.proactiveAlert);
-  const dismiss = useUiStore((state) => state.dismissProactiveAlert);
-  if (!notice) return null;
-  const view = () => {
-    dismiss();
-    router.push(notice.caseId ? `/alerts/${notice.caseId}` : "/alerts");
-  };
+  const toast = useUiStore((state) => state.activityToast);
+  const dismiss = useUiStore((state) => state.dismissActivityToast);
+
+  useEffect(() => {
+    if (!toast || toast.durationMs === null) return;
+    const timer = window.setTimeout(() => dismiss(toast.id), toast.durationMs ?? 6_000);
+    return () => window.clearTimeout(timer);
+  }, [dismiss, toast]);
+
+  if (!toast) return null;
+  const tone = toast.tone ?? "info";
+  const Icon = tone === "alert" ? BellRing : tone === "success" ? CheckCircle2 : toast.title.toLowerCase().includes("audio") ? Volume2 : Info;
   return (
-    <aside className="fixed right-3 bottom-[calc(5.5rem+env(safe-area-inset-bottom))] left-3 z-[70] mx-auto max-w-md rounded-2xl border border-[#8ed3bd]/30 bg-[#102c24] p-4 text-white shadow-2xl md:right-6 md:bottom-6 md:left-auto" role="alert" aria-label="New proactive portfolio alert" data-testid="proactive-alert-toast">
-      <div className="grid grid-cols-[36px_1fr_44px] gap-3">
-        <span className="grid size-9 place-items-center rounded-xl bg-[#63dbc1]/15 text-[#63dbc1]"><BellRing size={17} aria-hidden="true" /></span>
+    <section className="activity-toast-stack" aria-live="polite" aria-label="Wealth Copilot activity notifications">
+      <article className={`activity-toast activity-toast--${tone}`} key={toast.id} role={tone === "alert" ? "alert" : "status"} data-testid="activity-toast">
+        <span className="activity-toast__icon"><Icon size={17} aria-hidden="true" /></span>
         <div className="min-w-0">
-          <p className="text-[10px] font-bold tracking-wider text-[#63dbc1] uppercase">New proactive alert</p>
-          <strong className="mt-1 block text-sm">{notice.title}</strong>
-          <p className="mt-1 line-clamp-2 text-xs leading-5 text-white/65">{notice.summary}</p>
-          <button className="mt-2 min-h-11 rounded-xl bg-white px-4 text-xs font-bold text-[#12382e]" type="button" onClick={view}>View alert</button>
+          <strong>{toast.title}</strong>
+          {toast.detail && <p>{toast.detail}</p>}
+          {toast.actionHref && toast.actionLabel && (
+            <button
+              type="button"
+              onClick={() => {
+                dismiss(toast.id);
+                router.push(toast.actionHref!);
+              }}
+            >
+              {toast.actionLabel}
+            </button>
+          )}
         </div>
-        <button className="grid size-11 place-items-center rounded-xl text-white/65 hover:bg-white/10" type="button" onClick={dismiss} aria-label="Dismiss proactive alert"><X size={17} aria-hidden="true" /></button>
-      </div>
-    </aside>
+        <button className="activity-toast__close" type="button" onClick={() => dismiss(toast.id)} aria-label={`Dismiss ${toast.title}`}>
+          <X size={15} aria-hidden="true" />
+        </button>
+      </article>
+    </section>
   );
 }
 
@@ -127,9 +230,10 @@ export function ProductProviders({ children }: { children: React.ReactNode }) {
   return (
     <QueryClientProvider client={queryClient}>
       <ProductEventBridge />
+      <ClockActivityNotifier />
       <ServiceWorkerRegistrar />
       {children}
-      <ProactiveAlertToast />
+      <ActivityToastStack />
     </QueryClientProvider>
   );
 }

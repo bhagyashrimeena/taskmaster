@@ -71,6 +71,8 @@ class Settings(BaseSettings):
     livekit_agent_name: str = "wealth-copilot"
     livekit_stt_model: str = "deepgram/nova-3"
     livekit_stt_language: str = "en-IN"
+    voice_llm_model: str = "gemini-2.5-flash-lite"
+    voice_llm_timeout_seconds: float = Field(default=8.0, gt=0, le=30)
     livekit_tts_model: str = "inworld/inworld-tts-2"
     livekit_tts_voice: str = "Ashley"
 

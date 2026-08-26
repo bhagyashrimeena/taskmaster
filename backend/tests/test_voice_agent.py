@@ -7,15 +7,25 @@ from livekit.agents import AgentSession
 
 from wealth_copilot.interaction.memory import conversation_store
 from wealth_copilot.interaction.schemas import InteractionMode
+from wealth_copilot.interaction.schemas import ConversationRequest
+from wealth_copilot.interaction.service import InteractionService
 from wealth_copilot.simulation import simulation_service
 from wealth_copilot.day.schemas import DayRunMode
 from wealth_copilot.day.store import financial_day_store
 from wealth_copilot.voice.agent import (
     TaskMasterTransportLLM,
     TaskMasterVoiceAgent,
+    _call_greeting,
     _metadata,
 )
 from wealth_copilot.voice.context import build_voice_context
+from wealth_copilot.voice.prompting import (
+    VoiceIntent,
+    build_live_call_prompt,
+    classify_voice_intent,
+    complete_sentences,
+)
+from wealth_copilot.voice.llm import voice_presentation_llm
 
 
 class StubInteractionService:
@@ -116,3 +126,81 @@ async def test_voice_context_uses_previous_turns_and_pinned_topic() -> None:
     assert second_context is not None
     assert second_context.previous_voice_turns
     assert second_context.pinned_context.last_discussed_symbol == "HDFCBANK"
+
+
+@pytest.mark.asyncio
+async def test_call_opening_is_conversational_and_handles_zero_or_one_active_case() -> None:
+    financial_day_store.update(lambda state: setattr(state, "run_mode", DayRunMode.DEMO))
+    simulation_service.advance_to("12:17")
+    context = await build_voice_context("voice-greeting-test", "call")
+
+    with_case = _call_greeting(context)
+    without_case = _call_greeting(context.model_copy(update={"active_cases": []}))
+
+    assert with_case.startswith("Hi, I’m Wealth Copilot")
+    assert "active cases loaded" not in with_case
+    assert "1 active cases" not in with_case
+    assert "Nothing urgent is flagged" in without_case
+
+
+@pytest.mark.asyncio
+async def test_live_call_prompt_routes_normal_status_without_report_metadata() -> None:
+    context = await build_voice_context("voice-status-test", "call")
+    prompt = build_live_call_prompt(
+        "How is the market today?", context, VoiceIntent.SIMPLE_STATUS
+    )
+
+    assert classify_voice_intent("What is the market status today?") == VoiceIntent.SIMPLE_STATUS
+    assert classify_voice_intent("Where should I invest today?") == VoiceIntent.UNSAFE_INVESTMENT_ADVICE
+    assert "no more than 65 words" in prompt
+    assert "Do not mention total portfolio value" in prompt
+    assert "provider names" in prompt
+    assert "HDFC" not in prompt.split("INTENT_GUIDANCE:", 1)[0]
+
+
+def test_streaming_sentence_buffer_releases_audio_before_full_answer() -> None:
+    sentences, tail = complete_sentences("Today is mildly weak. HDFC is still")
+    assert sentences == ["Today is mildly weak."]
+    assert tail == "HDFC is still"
+
+    final_sentences, final_tail = complete_sentences(tail, final=True)
+    assert final_sentences == ["HDFC is still"]
+    assert final_tail == ""
+
+
+@pytest.mark.asyncio
+async def test_voice_presenter_streams_short_answer_and_persists_shared_conversation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context = await build_voice_context("voice-stream-test", "call")
+
+    async def fake_stream(prompt: str):
+        assert "LIVE WEALTH COPILOT CALL" in prompt
+        yield "Today is mildly weak for your portfolio. "
+        yield "The largest relevant move is concentrated in one holding. "
+        yield "Would you like the exposure view?"
+
+    monkeypatch.setattr(voice_presentation_llm, "stream", fake_stream)
+    service = InteractionService()
+    chunks = [
+        chunk
+        async for chunk in service.stream_voice(
+            ConversationRequest(
+                conversation_id="voice-stream-test",
+                message="How is the market today?",
+                mode=InteractionMode.CALL,
+                voice_context=context,
+            ),
+            intent=VoiceIntent.SIMPLE_STATUS,
+        )
+    ]
+
+    answer = "".join(chunks)
+    assert chunks[0].startswith("Today is mildly weak")
+    assert len(answer.split()) <= 65
+    assert "portfolio value" not in answer.lower()
+    history = conversation_store.get("voice-stream-test").history
+    assert history[-2:] == [
+        ("user", "How is the market today?"),
+        ("assistant", answer.strip()),
+    ]

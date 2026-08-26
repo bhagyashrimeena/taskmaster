@@ -22,9 +22,9 @@ interface CopilotAgentCardProps {
 }
 
 export function CopilotAgentCard(props: CopilotAgentCardProps) {
-  const badgeLabel = props.callActive ? "ON CALL" : props.callConnecting ? "CONNECTING" : props.callEnabled ? "CALL READY" : "TEXT READY";
-  const callLabel = props.callConnecting ? "Connecting..." : props.callEnabled ? "Start live call" : "Call setup needed";
-  const callDetail = props.callEnabled ? "Two-way voice session" : "LiveKit is not configured";
+  const badgeLabel = props.callActive ? "ON CALL" : props.callConnecting ? "CONNECTING" : props.callEnabled ? "CALL AVAILABLE" : "TEXT READY";
+  const callLabel = props.callConnecting ? "Connecting..." : props.callEnabled ? "Live call" : "Call setup needed";
+  const callDetail = props.callEnabled ? "Talk to the agent now" : "LiveKit is not configured";
 
   const holdStart = (event: PointerEvent<HTMLButtonElement>) => {
     event.preventDefault();
@@ -59,11 +59,11 @@ export function CopilotAgentCard(props: CopilotAgentCardProps) {
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <h2 id="agent-card-title">Wealth Copilot</h2>
-            <span className={`copilot-live-badge ${props.callActive || props.callConnecting || props.callEnabled ? "is-live" : ""}`}>
+            <span className={`copilot-live-badge ${props.callActive || props.callConnecting ? "is-live" : ""}`}>
               <i /> {badgeLabel}
             </span>
           </div>
-          <p>Dictate a prompt or start a live call</p>
+          <p>Voice draft or live call — same Copilot brain</p>
         </div>
         <span className="copilot-agent-card__signal"><Volume2 size={19} aria-hidden="true" /></span>
       </header>
@@ -110,14 +110,14 @@ export function CopilotAgentCard(props: CopilotAgentCardProps) {
             aria-label="Hold to dictate a prompt"
           >
             <Mic size={18} aria-hidden="true" />
-            <span className="copilot-agent-card__button-copy"><strong>Hold to dictate</strong><small>Fills the question box</small></span>
+            <span className="copilot-agent-card__button-copy"><strong>Voice draft</strong><small>Hold, then review</small></span>
           </button>
         </div>
       )}
 
       <div className="copilot-agent-card__mode-note" aria-label="Voice and call behavior">
-        <span><Mic size={13} aria-hidden="true" /> Voice writes a draft first</span>
-        <span><Phone size={13} aria-hidden="true" /> Call is live after connecting</span>
+        <span><Mic size={13} aria-hidden="true" /> Voice draft fills the box</span>
+        <span><Phone size={13} aria-hidden="true" /> Live call starts after connect</span>
       </div>
 
       <div className="copilot-agent-card__trust">
