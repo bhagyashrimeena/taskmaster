@@ -4,6 +4,8 @@ const backendUrl = process.env.WEALTH_COPILOT_BACKEND_URL ?? "http://127.0.0.1:8
 
 const nextConfig: NextConfig = {
   allowedDevOrigins: ["localhost", "127.0.0.1"],
+  distDir: process.env.NEXT_DIST_DIR ?? ".next",
+  devIndicators: false,
   async headers() {
     return [
       {

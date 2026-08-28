@@ -63,7 +63,7 @@ export function CopilotAgentCard(props: CopilotAgentCardProps) {
               <i /> {badgeLabel}
             </span>
           </div>
-          <p>Voice draft or live call — same Copilot brain</p>
+          <p>LiveKit voice, same TaskMaster brain</p>
         </div>
         <span className="copilot-agent-card__signal"><Volume2 size={19} aria-hidden="true" /></span>
       </header>
@@ -118,6 +118,12 @@ export function CopilotAgentCard(props: CopilotAgentCardProps) {
       <div className="copilot-agent-card__mode-note" aria-label="Voice and call behavior">
         <span><Mic size={13} aria-hidden="true" /> Voice draft fills the box</span>
         <span><Phone size={13} aria-hidden="true" /> Live call starts after connect</span>
+      </div>
+
+      <div className="mt-3 grid grid-cols-3 gap-2 text-[10px] font-bold uppercase tracking-wider text-white/60">
+        <span className="rounded-xl border border-white/10 bg-white/7 px-2 py-2">Supervisor</span>
+        <span className="rounded-xl border border-white/10 bg-white/7 px-2 py-2">Specialists</span>
+        <span className="rounded-xl border border-white/10 bg-white/7 px-2 py-2">Rules score</span>
       </div>
 
       <div className="copilot-agent-card__trust">

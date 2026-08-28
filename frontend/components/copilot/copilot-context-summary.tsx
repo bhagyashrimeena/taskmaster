@@ -1,4 +1,4 @@
-import { BriefcaseBusiness, FileText, FolderOpen, ShieldCheck } from "lucide-react";
+import { BriefcaseBusiness, CalendarCheck, FileText, FolderOpen, ShieldCheck, Sparkles } from "lucide-react";
 
 function metric(value: number | undefined) {
   return value === undefined ? "—" : value.toLocaleString("en-IN");
@@ -8,15 +8,21 @@ export function CopilotContextSummary({
   holdings,
   stories,
   cases,
+  scenarios,
+  watchEvents,
 }: {
   holdings?: number;
   stories?: number;
   cases?: number;
+  scenarios?: number;
+  watchEvents?: number;
 }) {
   const metrics = [
     { label: "Holdings", value: holdings, icon: BriefcaseBusiness },
     { label: "Relevant stories", value: stories, icon: FileText },
     { label: "Active cases", value: cases, icon: FolderOpen },
+    { label: "Scenarios", value: scenarios, icon: Sparkles },
+    { label: "Watch events", value: watchEvents, icon: CalendarCheck },
   ];
   return (
     <section className="copilot-context-card" aria-labelledby="copilot-context-heading">

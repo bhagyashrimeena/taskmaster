@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, ShieldCheck } from "lucide-react";
+import { ChevronDown, Landmark, ShieldCheck, WalletCards } from "lucide-react";
 
 import { AllocationDonut, ContributionBars, PortfolioHorizonChart, SectorBars } from "@/components/charts/portfolio-charts";
 import { FinancialValue, PercentChange } from "@/components/primitives/financial-value";
@@ -52,6 +52,29 @@ export function PortfolioView() {
         <div className="col-span-2 p-5 sm:col-span-1"><span className="metric-label">Portfolio value</span><FinancialValue value={portfolio.portfolio_value} className="mt-1.5 block text-4xl font-semibold tracking-tight md:text-[2.7rem]"/><span className="mt-1 block text-xs text-muted">As of {new Date(portfolio.as_of).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" })}</span></div>
         <div className="border-t border-line p-4 sm:border-t-0 sm:border-l sm:p-5"><span className="metric-label">Today</span><FinancialValue value={portfolio.day_pnl ?? 0} change className="mt-2 block text-lg"/><div className="mt-1 text-sm"><PercentChange value={portfolio.day_change_pct}/></div></div>
         <div className="border-t border-l border-line p-4 sm:border-t-0 sm:p-5"><span className="metric-label">Overall</span><FinancialValue value={portfolio.unrealized_pnl} change className="mt-2 block text-lg"/><div className="mt-1 text-sm"><PercentChange value={portfolio.overall_return_pct}/></div></div>
+      </section>
+      <section className="product-card mb-4 p-4 md:p-5" aria-label="Portfolio data available to Wealth Copilot">
+        <p className="section-kicker">Agent context</p>
+        <h2 className="section-title mt-1.5">Portfolio depth Wealth Copilot can reason from</h2>
+        <div className="mt-4 grid gap-3 md:grid-cols-4">
+        <div className="rounded-2xl bg-background/70 p-3">
+          <WalletCards className="text-brand" size={18} aria-hidden="true" />
+          <strong className="mt-2 block text-sm">{portfolio.holdings_count} holdings</strong>
+          <p className="mt-1 text-xs leading-5 text-muted">Quantity, price, cost basis, weight, and daily P&L are available to the agent.</p>
+        </div>
+        <div className="rounded-2xl bg-background/70 p-3">
+          <Landmark className="text-investigate" size={18} aria-hidden="true" />
+          <strong className="mt-2 block text-sm">{portfolio.sector_exposure.length} sectors</strong>
+          <p className="mt-1 text-xs leading-5 text-muted">Direct exposure and sector look-through power relevance scoring.</p>
+        </div>
+        {portfolio.asset_allocation.slice(0, 2).map((allocation) => (
+          <div className="rounded-2xl bg-background/70 p-3" key={allocation.label}>
+            <span className="grid size-8 place-items-center rounded-xl bg-brand-soft text-xs font-black text-brand">{allocation.portfolio_weight.toFixed(0)}%</span>
+            <strong className="mt-2 block text-sm">{allocation.label}</strong>
+            <p className="mt-1 text-xs leading-5 text-muted">₹{allocation.market_value.toLocaleString("en-IN", { maximumFractionDigits: 0 })} represented in context.</p>
+          </div>
+        ))}
+        </div>
       </section>
       <div className="grid gap-4 lg:grid-cols-2">
         <div className="lg:col-span-2"><ChartCard eyebrow="Performance" title="Returns by horizon"><PortfolioHorizonChart portfolio={portfolio} activePeriod={range} onPeriodChange={setRange}/></ChartCard></div>

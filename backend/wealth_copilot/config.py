@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     simulation_mode: Literal["normal", "judge"] = "normal"
     simulation_scenario_id: str = "hdfc-company-shock"
     news_candidate_count: int = Field(default=20, ge=10, le=20)
-    news_cache_ttl_seconds: int = Field(default=900, ge=0, le=86400)
+    news_cache_ttl_seconds: int = Field(default=300, ge=0, le=86400)
     market_snapshot_file: str = str(_BACKEND_DIR / ".cache" / "market" / "latest.json")
     zerodha_mcp_url: str = "https://mcp.kite.trade/mcp"
     zerodha_mcp_timeout_seconds: float = Field(default=15.0, gt=0, le=120)
@@ -46,6 +46,12 @@ class Settings(BaseSettings):
     tts_language_code: str = "en-IN"
     audio_cache_dir: str = str(_BACKEND_DIR / ".cache" / "audio")
     day_state_dir: str = str(_BACKEND_DIR / ".cache" / "days")
+    firestore_enabled: bool = False
+    firestore_project_id: str | None = None
+    firestore_database: str = "(default)"
+    firestore_collection_prefix: str = "wealth_copilot"
+    firestore_timeout_seconds: float = Field(default=3.0, gt=0, le=15)
+    likely_scenario_news_window_minutes: int = Field(default=5, ge=1, le=60)
     day_schedule_mode: Literal["disabled", "real", "demo"] = "real"
     day_schedule_timezone: str = "Asia/Kolkata"
     market_watch_interval_minutes: int = Field(default=15, ge=5, le=60)

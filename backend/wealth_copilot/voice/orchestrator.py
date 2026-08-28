@@ -56,14 +56,20 @@ class VoiceCallOrchestrator:
 
     async def emit(self, event: str, message: str) -> None:
         if self.status_sink:
-            await self.status_sink(event, message)
+            try:
+                await self.status_sink(event, message)
+            except Exception:
+                logger.debug("Voice status publish failed", exc_info=True)
 
     async def start(self) -> VoiceContext:
         started = perf_counter()
         # ADC/client construction performs synchronous discovery on first use.
         # Keep it off LiveKit's event loop so room events cannot miss their
         # readiness deadline while the call is connecting.
-        await asyncio.to_thread(voice_presentation_llm.warm)
+        try:
+            await asyncio.to_thread(voice_presentation_llm.warm)
+        except Exception:
+            logger.warning("Voice presentation LLM warmup failed; first spoken turn may use fallback", exc_info=True)
         await self.emit("loading_context", "Opening today’s portfolio context…")
         self._context = await build_voice_context(self.conversation_id, InteractionMode.CALL.value)
         self._context_loaded_at = perf_counter()

@@ -16,6 +16,7 @@ from google.genai import types
 
 from ..agents.taskmaster import root_agent
 from ..config import get_settings
+from ..followups import followup_service
 from .context import resolve_surface_context
 from .memory import (
     conversation_store,
@@ -40,6 +41,10 @@ _UNSAFE_SENTENCE = re.compile(
 )
 _ACTION_DISCLAIMER = re.compile(
     r"[^.!?\n]*(?:does not constitute|is not)[^.!?\n]*(?:investment advice|recommendation)[^.!?\n]*(?:buy|sell|hold)[^.!?\n]*[.!?]?",
+    re.IGNORECASE,
+)
+_WATCH_EVENT_INTENT = re.compile(
+    r"\b(remind me|add (?:a )?(?:watch|calendar)|check .*tomorrow|review .*tomorrow)\b",
     re.IGNORECASE,
 )
 
@@ -157,6 +162,14 @@ def _json_context(value) -> str:
     return json.dumps(value, default=str)
 
 
+def _requested_watch_symbol(message: str) -> str | None:
+    normalized = message.upper()
+    for symbol in ("RELIANCE", "HDFCBANK", "INFY", "TCS", "ICICIBANK"):
+        if symbol in normalized:
+            return symbol
+    return None
+
+
 TaskMasterCall = Callable[[str, float], Awaitable[tuple]]
 
 
@@ -266,7 +279,28 @@ class InteractionService:
             conversation_id, story_id=story_id, event_id=event_id
         )
         surface_context = await resolve_surface_context(story_id=story_id, event_id=event_id)
+        created_watch_event = None
+        symbol = _requested_watch_symbol(request.message)
+        if symbol and _WATCH_EVENT_INTENT.search(request.message):
+            created_watch_event = followup_service.create_watch_event(
+                title=f"Review {symbol} market reaction",
+                description=(
+                    f"Wealth Copilot created this internal watch event after the user asked to revisit {symbol}. "
+                    "Review price movement, sector reaction, and any follow-up announcements."
+                ),
+                symbol=symbol,
+                story_id=story_id,
+                case_id=None,
+                trigger_type="user_requested",
+                created_by="user",
+            )
         prompt = build_live_call_prompt(request.message, voice_context, intent)
+        if created_watch_event is not None:
+            prompt += (
+                "\nINTERNAL_WATCH_EVENT_CREATED: "
+                f"{created_watch_event.title} at {created_watch_event.scheduled_for.isoformat()}. "
+                "Mention briefly that this is an internal Wealth Copilot watch event, not Google Calendar sync."
+            )
         buffer = ""
         spoken: list[str] = []
         words_used = 0
@@ -353,6 +387,21 @@ class InteractionService:
             conversation_id, story_id=story_id, event_id=event_id
         )
         context = await resolve_surface_context(story_id=story_id, event_id=event_id)
+        created_watch_event = None
+        symbol = _requested_watch_symbol(request.message)
+        if symbol and _WATCH_EVENT_INTENT.search(request.message):
+            created_watch_event = followup_service.create_watch_event(
+                title=f"Review {symbol} market reaction",
+                description=(
+                    f"Wealth Copilot created this internal watch event after the user asked to revisit {symbol}. "
+                    "Review price movement, sector reaction, and any follow-up announcements."
+                ),
+                symbol=symbol,
+                story_id=story_id,
+                case_id=None,
+                trigger_type="user_requested",
+                created_by="user",
+            )
         route = _route(request, context)
         voice_context = request.voice_context
         if voice_context is None and request.mode in {InteractionMode.VOICE, InteractionMode.CALL}:
@@ -410,6 +459,7 @@ class InteractionService:
             f"VOICE_CONTEXT: {_json_context(voice_context)}\n"
             f"RECENT_CONVERSATION:\n{history_text}\n"
             f"USER_QUESTION: {request.message}\n"
+            f"WATCH_EVENT_CREATED: {created_watch_event.title + ' at ' + created_watch_event.scheduled_for.isoformat() if created_watch_event else 'none'}\n"
             f"{mode_rule} Answer the user's exact question in consumer-friendly plain sentences. "
             "Keep facts and interpretation clear without scaffold labels like 'Facts', 'Interpretation', 'Relevance & Interpretation', or 'Dashboard context'. "
             "Explain relevance without giving investment instructions or price predictions."

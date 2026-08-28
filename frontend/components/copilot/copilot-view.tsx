@@ -165,6 +165,8 @@ export function CopilotView() {
           holdings={bootstrap.data?.holdings_count}
           stories={bootstrap.data?.relevant_story_count}
           cases={bootstrap.data?.active_case_count}
+          scenarios={bootstrap.data?.likely_scenario_count}
+          watchEvents={bootstrap.data?.watch_event_count}
         />
       </div>
 

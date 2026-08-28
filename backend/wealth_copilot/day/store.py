@@ -9,6 +9,7 @@ from time import sleep
 from uuid import uuid4
 
 from ..config import application_today, get_settings
+from ..persistence import firestore_persistence
 from .schemas import FinancialDayState, StepStatus, default_timeline
 
 
@@ -66,6 +67,7 @@ class FinancialDayStore:
                         raise
                     # Cloud-synced Windows workspaces can briefly lock the old file.
                     sleep(0.01 * (attempt + 1))
+        firestore_persistence.persist_financial_day(state)
         return state.model_copy(deep=True)
 
     def update(

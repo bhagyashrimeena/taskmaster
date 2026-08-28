@@ -13,6 +13,7 @@ from typing import Iterable
 
 from .schemas import DailyInteractionView, SurfaceContext
 from ..config import application_today, get_settings
+from ..persistence import firestore_persistence
 
 
 _TOKEN = re.compile(r"[a-z0-9]{2,}", re.IGNORECASE)
@@ -168,6 +169,7 @@ class ConversationStore:
             record = self._records.setdefault(conversation_id, ConversationRecord())
             record.history.append((role, text))
             record.history[:] = record.history[-12:]
+        firestore_persistence.persist_conversation_turn(conversation_id, role, text)
 
     def clear(self) -> None:
         with self._lock:

@@ -1,4 +1,4 @@
-import { ArrowUpRight, BellRing, Newspaper } from "lucide-react";
+import { ArrowUpRight, BellRing, Gauge, Layers3, Newspaper, Route } from "lucide-react";
 import Link from "next/link";
 
 import type { AttentionItem } from "@/lib/product-types";
@@ -6,6 +6,7 @@ import { StatusBadge } from "@/components/primitives/status-badge";
 
 export function AttentionCard({ item }: { item: AttentionItem }) {
   const event = item.kind === "event";
+  const caseHref = item.case_id ? `/alerts/${item.case_id}` : "/alerts";
   return (
     <article className={`product-card p-5 ${event ? "border-alert/30" : ""}`}>
       <header className="flex items-start justify-between gap-4">
@@ -17,14 +18,28 @@ export function AttentionCard({ item }: { item: AttentionItem }) {
       </header>
       <h2 className={`mt-4 font-bold leading-tight tracking-[-0.025em] ${event ? "text-2xl md:text-3xl" : "text-xl md:text-2xl"}`}>{item.title}</h2>
       {event && (
-        <div className="mt-4 flex flex-wrap gap-2 text-xs font-semibold">
-          <span className="rounded-xl bg-alert/10 px-3 py-2 text-alert">{item.direct_exposure_pct.toFixed(1)}% direct exposure</span>
-          <span className="rounded-xl bg-background px-3 py-2 text-muted">Relevance {item.relevance_score.toFixed(0)}</span>
+        <div className="mt-4 grid grid-cols-3 gap-2 text-xs font-semibold">
+          <span className="rounded-xl bg-alert/10 px-3 py-2 text-alert">
+            <Layers3 className="mb-1" size={14} aria-hidden="true" />
+            {item.direct_exposure_pct.toFixed(1)}% direct
+          </span>
+          <span className="rounded-xl bg-background px-3 py-2 text-muted">
+            <Route className="mb-1 text-brand" size={14} aria-hidden="true" />
+            {item.sector_exposure_pct.toFixed(1)}% sector
+          </span>
+          <span className="rounded-xl bg-background px-3 py-2 text-muted">
+            <Gauge className="mb-1 text-brand" size={14} aria-hidden="true" />
+            Score {item.relevance_score.toFixed(0)}
+          </span>
         </div>
       )}
       <p className="mt-3 text-sm leading-6 text-muted">{item.summary}</p>
+      <div className="mt-3 rounded-2xl border border-line bg-background/70 px-3 py-2 text-xs leading-5 text-muted">
+        <strong className="text-ink">Agent outcome:</strong>{" "}
+        {event ? `${item.status.toLowerCase()} — opened as a portfolio-specific attention case.` : "monitored — relevant enough to brief, not urgent enough to interrupt."}
+      </div>
       <div className="mt-4 flex flex-wrap gap-2">
-        <Link className="inline-flex items-center gap-2 rounded-xl bg-brand px-4 py-2.5 text-xs font-bold text-white" href={event ? "/alerts" : "/copilot"}>
+        <Link className="inline-flex items-center gap-2 rounded-xl bg-brand px-4 py-2.5 text-xs font-bold text-white" href={event ? caseHref : "/copilot"}>
           {event ? "Open case" : "Explain"}<ArrowUpRight size={14}/>
         </Link>
         <Link className="rounded-xl border border-line px-4 py-2.5 text-xs font-bold" href="/copilot">Ask Copilot</Link>

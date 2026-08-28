@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, BookOpenText, CalendarClock, ListChecks, Sparkles } from "lucide-react";
+import { Activity, BookOpenText, CalendarCheck, CalendarClock, GitBranch, ListChecks, Sparkles } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
 import { PageHeader } from "@/components/primitives/page-header";
@@ -50,8 +50,8 @@ export function TimelineView() {
     <div>
       <PageHeader
         eyebrow="Financial day"
-        title="Context that compounds all day"
-        description="Morning intelligence, proactive events, research, close and recap remain one continuous story."
+        title="Autonomous financial-day operator"
+        description="Time-triggered updates and event-triggered alerts share one retained run, so context compounds from morning to evening."
         meta={<StatusBadge status={data.status} />}
       />
       {query.isError && (
@@ -78,9 +78,55 @@ export function TimelineView() {
         <DayClockControls />
       </section>
 
+      <section className="product-card mb-4 grid gap-3 p-4 md:grid-cols-3 md:p-5" aria-label="Financial day operating model">
+        <div className="rounded-2xl bg-background/70 p-3">
+          <CalendarClock className="text-brand" size={18} aria-hidden="true" />
+          <strong className="mt-2 block text-sm">Time-triggered</strong>
+          <p className="mt-1 text-xs leading-5 text-muted">Morning pulse, health, market close, evening wrap, and tomorrow prep.</p>
+        </div>
+        <div className="rounded-2xl bg-background/70 p-3">
+          <Activity className="text-alert" size={18} aria-hidden="true" />
+          <strong className="mt-2 block text-sm">Event-triggered</strong>
+          <p className="mt-1 text-xs leading-5 text-muted">Unusual moves become cases only when exposure and materiality justify attention.</p>
+        </div>
+        <div className="rounded-2xl bg-background/70 p-3">
+          <GitBranch className="text-investigate" size={18} aria-hidden="true" />
+          <strong className="mt-2 block text-sm">Retained state</strong>
+          <p className="mt-1 text-xs leading-5 text-muted">Cases, questions, research, audio, and advisor packets stay attached to this day.</p>
+        </div>
+      </section>
+
+      {data.calendar_watch_events.length > 0 && (
+        <section className="product-card mb-4 p-4 md:p-5" aria-labelledby="watch-events-heading">
+          <p className="section-kicker">Calendar watch events</p>
+          <h2 id="watch-events-heading" className="section-title mt-1.5">Follow-ups the agent is carrying forward</h2>
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
+            {data.calendar_watch_events.map((event) => (
+              <article className="rounded-2xl border border-line bg-background/70 p-3" key={event.event_id}>
+                <div className="flex items-start gap-3">
+                  <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-brand-soft text-brand">
+                    <CalendarCheck size={16} aria-hidden="true" />
+                  </span>
+                  <div>
+                    <strong className="block text-sm">{event.title}</strong>
+                    <time className="mt-1 block text-[11px] font-semibold text-muted">
+                      {new Date(event.scheduled_for).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })}
+                    </time>
+                    <p className="mt-2 text-xs leading-5 text-muted">{event.reminder_copy}</p>
+                    <span className="mt-2 inline-flex rounded-full border border-line px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-muted">
+                      Internal watch event · no external calendar sync
+                    </span>
+                  </div>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
+
       <div className="grid gap-4 lg:grid-cols-[1fr_0.72fr]">
         <section className="product-card p-5 md:p-6" aria-labelledby="checkpoints-heading">
-          <h2 id="checkpoints-heading" className="section-title mb-5">Today’s updates</h2>
+          <h2 id="checkpoints-heading" className="section-title mb-5">Todayâ€™s updates</h2>
           <ol className="relative grid gap-0">
             {data.timeline.map((step, index) => {
               const display = CHECKPOINT_DISPLAYS[step.step_id] ?? DEFAULT_DISPLAY;
@@ -124,7 +170,7 @@ export function TimelineView() {
           {data.financial_day.tomorrow_events.length > 0 && (
             <section className="product-card p-5" aria-labelledby="tomorrow-heading">
               <p className="section-kicker">Tomorrow</p>
-              <h2 id="tomorrow-heading" className="sr-only">Tomorrow’s relevant events</h2>
+              <h2 id="tomorrow-heading" className="sr-only">Tomorrowâ€™s relevant events</h2>
               <div className="mt-3 divide-y divide-line">
                 {data.financial_day.tomorrow_events.map((item) => (
                   <div className="py-3 first:pt-0 last:pb-0" key={item.event_id}>

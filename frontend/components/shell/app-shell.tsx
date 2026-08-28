@@ -1,6 +1,6 @@
 "use client";
 
-import { BellRing, Bot, Clock3, Home, PieChart, Sparkles } from "lucide-react";
+import { BellRing, Bot, Clock3, Home, PieChart, Settings2, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -28,16 +28,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="min-h-screen bg-background text-ink">
-      <header className="sticky top-0 z-40 border-b border-line/80 bg-background/90 backdrop-blur-xl md:hidden">
-        <div className="flex h-15 items-center justify-between px-4">
-          <Link href="/" className="flex items-center gap-2 rounded-lg font-bold tracking-tight">
-            <span className="grid size-8 place-items-center rounded-xl bg-brand text-white"><Sparkles size={16}/></span>
+      <header className="sticky top-0 z-40 border-b border-line/80 bg-background/92 backdrop-blur-xl md:hidden">
+        <div className="flex min-h-14 items-center justify-between gap-3 px-3.5 py-2">
+          <Link href="/" className="flex min-w-0 items-center gap-2 rounded-lg text-[17px] font-bold leading-none tracking-tight">
+            <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-brand text-[#061614] shadow-[0_0_18px_rgba(37,242,194,.22)]"><Sparkles size={17}/></span>
             Wealth Copilot
           </Link>
-          <span className="text-right text-[10px] leading-4 text-muted">
+          <span className="shrink-0 text-right text-[10px] leading-4 text-muted">
             {day ? new Date(day.trading_date).toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" }) : "Today"}
             <strong className="block text-brand">{day?.status === "complete" ? "Day complete" : day?.status === "running" ? "Updating" : "Monitoring"}</strong>
           </span>
+          <Link href="/onboarding" className="grid size-9 shrink-0 place-items-center rounded-xl border border-brand/20 text-brand" aria-label="Open onboarding setup">
+            <Settings2 size={17} />
+          </Link>
         </div>
       </header>
 
@@ -63,24 +66,27 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <div className="mt-auto rounded-2xl border border-line bg-background p-4 text-xs leading-5 text-muted">
           <strong className="block text-ink">{day?.completed_count ?? 0}/{day?.total_count ?? 13} updates complete</strong>
           Financial truth stays in the backend.
+          <Link href="/onboarding" className="mt-3 flex min-h-10 items-center justify-center rounded-xl bg-brand text-xs font-bold text-background">
+            Setup profile
+          </Link>
         </div>
       </aside>
 
-      <main className="w-full px-4 pt-6 pb-[calc(7.25rem+env(safe-area-inset-bottom))] md:ml-60 md:w-[calc(100%-15rem)] md:px-8 md:pt-9 md:pb-12 lg:px-12">
+      <main className="w-full px-3.5 pt-4 pb-[calc(8rem+env(safe-area-inset-bottom))] md:ml-60 md:w-[calc(100%-15rem)] md:px-8 md:pt-9 md:pb-12 lg:px-12">
         <div className="mx-auto w-full max-w-6xl">{children}</div>
       </main>
 
-      <nav data-mobile-nav className="fixed right-2 bottom-[calc(.5rem+env(safe-area-inset-bottom))] left-2 z-50 grid h-[4.25rem] grid-cols-5 rounded-[1.35rem] border border-white/10 bg-[#12201b]/96 p-1 text-white shadow-2xl backdrop-blur-xl md:hidden" aria-label="Primary navigation">
+      <nav data-mobile-nav className="fixed right-2 bottom-[calc(.5rem+env(safe-area-inset-bottom))] left-2 z-50 grid h-[3.75rem] grid-cols-5 rounded-[1.05rem] border border-brand/15 bg-[#061014]/90 p-1 text-white shadow-2xl backdrop-blur-xl md:hidden" aria-label="Primary navigation">
         {destinations.map(({ href, label, icon: Icon }) => {
           const active = activePath(pathname, href);
           return (
             <Link key={href} href={href} className={cn(
-              "flex min-w-0 flex-col items-center justify-center gap-0.5 rounded-[1rem] text-[9px] leading-none text-white/60 transition-colors min-[360px]:text-[10px]",
-              active && "bg-brand text-white shadow-[inset_0_0_0_1px_rgba(255,255,255,.08)]",
+              "flex min-w-0 flex-col items-center justify-center gap-0.5 rounded-[.8rem] text-[9px] leading-none text-white/58 transition-colors min-[360px]:text-[10px]",
+              active && "bg-brand/15 text-brand shadow-[inset_0_0_0_1px_rgba(111,255,224,.16)]",
             )} aria-current={active ? "page" : undefined}>
               <span className="relative">
-                <Icon size={href === "/copilot" ? 21 : 18}/>
-                {href === "/alerts" && alertCount > 0 && <span className="absolute -top-1.5 -right-2 grid min-w-4 place-items-center rounded-full bg-[#ff826f] px-1 py-0.5 text-[8px] font-bold text-[#12201b]" aria-label={`${alertCount} alerts need attention`}>{alertCount}</span>}
+                <Icon size={href === "/copilot" ? 20 : 18}/>
+                {href === "/alerts" && alertCount > 0 && <span className="absolute -top-1.5 -right-2 grid min-w-4 place-items-center rounded-full bg-[#ff6575] px-1 py-0.5 text-[8px] font-bold text-white" aria-label={`${alertCount} alerts need attention`}>{alertCount}</span>}
               </span>{label}
             </Link>
           );

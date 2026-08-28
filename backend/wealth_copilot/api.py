@@ -39,6 +39,14 @@ from .interaction.schemas import (
 from .interaction.service import interaction_service
 from .media.schemas import AudioBrief, AudioBriefType, AudioGenerationResponse
 from .media.service import media_service
+from .onboarding import onboarding_service
+from .onboarding.schemas import (
+    OnboardingInferenceRequest,
+    OnboardingProfileResponse,
+    OnboardingSaveRequest,
+    OnboardingSession,
+    SuggestedProfile,
+)
 from .day.orchestrator import day_orchestrator
 from .day.presentation import (
     FinancialDayClockState,
@@ -63,9 +71,12 @@ from .product_api.schemas import (
     AlertDetailResponse,
     AlertInboxResponse,
     CopilotBootstrapResponse,
+    CreateWatchEventRequest,
+    PersistenceStatusResponse,
     PortfolioResponse,
     TimelineResponse,
     TodayResponse,
+    WatchEventResponse,
 )
 from .product_api.service import product_api_service
 from .product_api.stream import product_event_stream
@@ -216,6 +227,27 @@ async def timeline() -> TimelineResponse:
     return await product_api_service.timeline()
 
 
+@app.post("/api/v1/onboarding/infer", response_model=SuggestedProfile)
+async def infer_onboarding_profile(request: OnboardingInferenceRequest) -> SuggestedProfile:
+    """Suggest editable onboarding defaults from early profile inputs."""
+
+    return onboarding_service.infer(request)
+
+
+@app.post("/api/v1/onboarding/profile", response_model=OnboardingSession)
+async def save_onboarding_profile(request: OnboardingSaveRequest) -> OnboardingSession:
+    """Persist selected onboarding values plus suggested defaults and overrides."""
+
+    return onboarding_service.save(request)
+
+
+@app.get("/api/v1/onboarding/profile", response_model=OnboardingProfileResponse)
+async def onboarding_profile(user_id: str = "demo_user") -> OnboardingProfileResponse:
+    """Return the saved final onboarding profile when one exists."""
+
+    return OnboardingProfileResponse(session=onboarding_service.get(user_id))
+
+
 @app.get("/api/v1/copilot", response_model=CopilotBootstrapResponse)
 async def copilot_bootstrap(
     conversation_id: str | None = None,
@@ -223,6 +255,20 @@ async def copilot_bootstrap(
     """Return stable day context and prompts before the chat UI mounts."""
 
     return await product_api_service.copilot_bootstrap(conversation_id)
+
+
+@app.get("/api/v1/persistence/status", response_model=PersistenceStatusResponse)
+async def persistence_status() -> PersistenceStatusResponse:
+    """Return whether Firestore mirroring is active without exposing credentials."""
+
+    return product_api_service.persistence_status()
+
+
+@app.post("/api/v1/watch-events", response_model=WatchEventResponse, status_code=201)
+async def create_watch_event(request: CreateWatchEventRequest) -> WatchEventResponse:
+    """Create an internal Wealth Copilot watch event; no external calendar write."""
+
+    return product_api_service.create_watch_event(request)
 
 
 @app.post("/api/v1/copilot", response_model=ConversationResponse)

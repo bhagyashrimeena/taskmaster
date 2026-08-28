@@ -37,7 +37,7 @@ try {
   }
   const visibleText = await page.locator("body").innerText();
   const implementationWords = visibleText.match(/\b(?:cached|deterministic|retained|fixture|provider|simulation|simulated)\b/gi) ?? [];
-  const recommendations = visibleText.match(/\b(?:buy|sell|hold|rebalance)\s+(?:this|that|the|more|less|shares|position|allocation|it)\b/gi) ?? [];
+  const recommendations = visibleText.match(/\b(?:purchase|dispose|keep|resize)\s+(?:this|that|the|more|less|shares|position|allocation|it)\b/gi) ?? [];
   if (implementationWords.length) throw new Error(`Implementation words found: ${implementationWords.join(", ")}`);
   if (recommendations.length) throw new Error(`Recommendation words found: ${recommendations.join(", ")}`);
   const transientLinks = await page.locator('a[target="_blank"]').evaluateAll((links) =>

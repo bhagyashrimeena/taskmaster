@@ -129,12 +129,15 @@ export function useLiveKitSession({
       await room.connect(session.livekit_url, session.token);
       if (session.conversation_id) onConversationId(session.conversation_id);
       await room.localParticipant.setMicrophoneEnabled(true);
+      setActive(true);
+      setMessage("Connected. Waiting for your wealth agent…");
+      onStateChange("callConnecting");
       if (room.remoteParticipants.size === 0) {
         await new Promise<void>((resolve, reject) => {
           const timer = window.setTimeout(() => {
             room.off(RoomEvent.ParticipantConnected, connected);
-            reject(new Error("The voice agent did not join the room."));
-          }, 12_000);
+            reject(new Error("The wealth agent worker did not join the room."));
+          }, 30_000);
           const connected = () => {
             window.clearTimeout(timer);
             resolve();
@@ -154,8 +157,8 @@ export function useLiveKitSession({
       clearAudio();
       setConnecting(false);
       setActive(false);
-      setMessage("The call could not connect. You can retry or type your question.");
-      onStateChange("error");
+      setMessage("The call room opened, but the wealth agent is not online yet. Start the LiveKit worker and retry, or type your question.");
+      onStateChange("callUnavailable");
     }
   }, [active, clearAudio, connecting, conversationId, enabled, onConversationId, onStateChange, onTranscript]);
 

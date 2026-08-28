@@ -105,6 +105,65 @@ class TomorrowEvent(DayModel):
     relevance_rank: int
 
 
+class NewsSnapshot(DayModel):
+    story_id: str
+    day_id: str
+    title: str
+    source_name: str
+    source_url: str
+    source_status: str
+    published_at: datetime
+    symbols: list[str] = Field(default_factory=list)
+    sectors: list[str] = Field(default_factory=list)
+    summary: str
+    known_facts: list[str] = Field(default_factory=list)
+    uncertainties: list[str] = Field(default_factory=list)
+    portfolio_relevance_reason: str
+    direct_exposure_percent: float = 0
+    sector_exposure_percent: float = 0
+    relevance_score: float = 0
+    decision: str
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class LikelyScenario(DayModel):
+    scenario_id: str
+    story_id: str
+    case_id: str | None = None
+    symbol: str | None = None
+    title: str
+    base_summary: str
+    scenario_type: str
+    likelihood_label: str
+    confidence: str
+    why_it_could_happen: str
+    what_to_monitor: str
+    portfolio_relevance: str
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    expires_at: datetime
+    status: str = "active"
+
+
+class CalendarWatchEvent(DayModel):
+    event_id: str
+    day_id: str
+    case_id: str | None = None
+    story_id: str | None = None
+    scenario_id: str | None = None
+    symbol: str | None = None
+    title: str
+    description: str
+    scheduled_for: datetime
+    trigger_type: str
+    status: str = "scheduled"
+    created_by: str = "agent"
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    completed_at: datetime | None = None
+    reminder_copy: str
+    external_provider: str | None = None
+    external_event_id: str | None = None
+
+
 class QuestionAsked(DayModel):
     question: str
     asked_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -181,6 +240,9 @@ class FinancialDayState(DayModel):
     story_audio_brief_id: str | None = None
     daily_story: DailyWealthStory | None = None
     tomorrow_events: list[TomorrowEvent] = Field(default_factory=list)
+    news_snapshots: list[NewsSnapshot] = Field(default_factory=list)
+    likely_scenarios: list[LikelyScenario] = Field(default_factory=list)
+    calendar_watch_events: list[CalendarWatchEvent] = Field(default_factory=list)
     unresolved_items: list[str] = Field(default_factory=list)
     timeline: list[DayTimelineStep] = Field(default_factory=default_timeline)
     simulated_duration_seconds: int | None = None

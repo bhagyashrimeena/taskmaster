@@ -15,9 +15,9 @@ const browser = await chromium.launch({
 const destinations = [
   { label: "Today", href: "/", expected: /Portfolio today/i, ready: /Portfolio today/i },
   { label: "Portfolio", href: "/portfolio", expected: /Your money, in context/i, ready: /Returns by horizon/i },
-  { label: "Copilot", href: "/copilot", expected: /Ask about your portfolio/i, ready: /Talk about today/i },
+  { label: "Copilot", href: "/copilot", expected: /Talk to your wealth agent/i, ready: /Suggested prompts|Your conversation/i },
   { label: "Alerts", href: "/alerts", expected: /What crossed the threshold/i, ready: /Nothing material needs your attention right now|Open case/i },
-  { label: "Timeline", href: "/timeline", expected: /Context that compounds all day/i, ready: /checkpoints complete/i },
+  { label: "Timeline", href: "/timeline", expected: /Autonomous financial-day operator/i, ready: /Time-triggered/i },
 ];
 
 async function evaluateViewport(name, viewport) {
@@ -109,18 +109,31 @@ async function evaluateViewport(name, viewport) {
     }
 
     const workerRegistration = "covered-by-polish-suite";
-    await page.goto(new URL("/copilot", baseUrl).href, { waitUntil: "domcontentloaded" });
-    await page.getByRole("heading", { name: "Ask about your portfolio" }).waitFor();
+    await page.goto(new URL("/copilot", baseUrl).href, { waitUntil: "networkidle" });
+    await page.getByRole("heading", { name: "Talk to your wealth agent" }).waitFor();
     await page.waitForFunction(() => !document.querySelector(".copilot-page > header p:last-child")?.textContent?.includes("Preparing"));
-    const persistenceQuestion = "What deserves my attention right now?";
-    await page.locator('[aria-label="Suggested questions"] button', { hasText: persistenceQuestion }).click();
-    await page.locator('article[aria-label="You"]', { hasText: persistenceQuestion }).waitFor();
+    const promptButton = page.locator('[aria-label="Suggested prompts"] button:visible, [aria-label="Suggested follow-ups"] button:visible').first();
+    const persistenceQuestion = (await promptButton.innerText()).trim();
+    await promptButton.evaluate((button) => button.click());
+    await page.waitForFunction(
+      (question) =>
+        Array.from(document.querySelectorAll('article[aria-label="You"]')).some((node) =>
+          node.textContent?.includes(question),
+        ),
+      persistenceQuestion,
+    );
     await page.waitForTimeout(500);
     if (mockedPosts !== 1) throw new Error(`Expected one mocked Copilot POST, received ${mockedPosts}; observed ${JSON.stringify(observedPosts)} at ${page.url()}. Conversation text: ${(await page.locator("main").innerText()).slice(-1200)}`);
     await page.locator("[data-copilot-answer-lead]", { hasText: "Your portfolio context remains attached across destinations." }).waitFor();
     await visibleNavigation.getByRole("link", { name: "Portfolio", exact: true }).click();
     await visibleNavigation.getByRole("link", { name: "Copilot", exact: true }).click();
-    await page.locator('article[aria-label="You"]', { hasText: persistenceQuestion }).waitFor();
+    await page.waitForFunction(
+      (question) =>
+        Array.from(document.querySelectorAll('article[aria-label="You"]')).some((node) =>
+          node.textContent?.includes(question),
+        ),
+      persistenceQuestion,
+    );
     await page.locator("[data-copilot-answer-lead]", { hasText: "Your portfolio context remains attached across destinations." }).waitFor();
 
     if (errors.length) throw new Error(errors.join("\n"));

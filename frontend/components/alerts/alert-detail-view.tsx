@@ -1,10 +1,14 @@
 "use client";
 
-import { ArrowLeft, Bot, ExternalLink } from "lucide-react";
+import { ArrowLeft, Bot, ExternalLink, FileText, Send, UserRoundCheck } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { useState } from "react";
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
+import { AdvisorSheet, type AdvisorTarget } from "@/components/advisor-sheet";
+import { AttentionPipeline } from "@/components/attention-pipeline";
+import { LikelyScenarios } from "@/components/likely-scenarios";
 import { PageHeader } from "@/components/primitives/page-header";
 import { ErrorState, LoadingState } from "@/components/primitives/states";
 import { StatusBadge } from "@/components/primitives/status-badge";
@@ -32,6 +36,7 @@ function signedPercent(value: number | string | null | undefined, digits = 1) {
 
 export function AlertDetailView() {
   const params = useParams<{ caseId: string }>();
+  const [advisorTarget, setAdvisorTarget] = useState<AdvisorTarget | null>(null);
   const query = useAlert(params.caseId);
   if (query.isLoading) return <LoadingState label="Loading the retained case" />;
   if (!query.data) {
@@ -120,6 +125,27 @@ export function AlertDetailView() {
         </section>
 
         <aside className="grid content-start gap-4">
+          <section className="product-card p-5 md:p-6" aria-labelledby="case-lifecycle-heading">
+            <p className="section-kicker">Active case</p>
+            <h2 id="case-lifecycle-heading" className="section-title mt-2">Carried through the financial day</h2>
+            <ol className="mt-4 grid gap-3">
+              {[
+                ["Detected", `${item.company ?? item.instrument ?? "Event"} crossed movement rules.`],
+                ["Investigated", `${item.direct_exposure_pct.toFixed(1)}% direct and ${item.sector_exposure_pct.toFixed(1)}% sector exposure checked.`],
+                ["Alerted", `Decision: ${item.decision}. Relevance ${item.relevance_score.toFixed(1)}/100.`],
+                ["Ready for follow-up", "Ask Copilot, research deeper, or send a packet to your advisor."],
+              ].map(([label, detail], index) => (
+                <li className="grid grid-cols-[28px_1fr] gap-3 text-xs" key={label}>
+                  <span className="grid size-7 place-items-center rounded-full bg-brand-soft font-bold text-brand">{index + 1}</span>
+                  <div>
+                    <strong className="block text-sm text-ink">{label}</strong>
+                    <span className="mt-0.5 block leading-5 text-muted">{detail}</span>
+                  </div>
+                </li>
+              ))}
+            </ol>
+          </section>
+
           <section className="product-card p-5 md:p-6" aria-labelledby="relevance-heading">
             <p className="section-kicker">Why this reached you</p>
             <h2 id="relevance-heading" className="section-title mt-2">Relevance {item.relevance_score.toFixed(0)}</h2>
@@ -144,14 +170,34 @@ export function AlertDetailView() {
 
           <section className="rounded-[var(--radius-card)] bg-[#12201b] p-5 text-white shadow-[var(--shadow-card)]">
             <Bot className="text-[#63dbc1]" aria-hidden="true" />
-            <h2 className="mt-3 text-xl font-semibold tracking-tight">Understand this case</h2>
-            <p className="mt-2 text-sm leading-6 text-white/65">Ask for a simple explanation or deeper research using this financial-day context.</p>
-            <Link href="/copilot" className="mt-4 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#63dbc1] px-4 py-3 text-xs font-bold text-[#12201b]">
-              Explain with Copilot <ExternalLink size={14} aria-hidden="true" />
-            </Link>
+            <h2 className="mt-3 text-xl font-semibold tracking-tight">Work this case</h2>
+            <p className="mt-2 text-sm leading-6 text-white/65">Same retained portfolio context can explain, research, or package this for a human advisor.</p>
+            <div className="mt-4 grid gap-2">
+              <Link href="/copilot" className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#63dbc1] px-4 py-3 text-xs font-bold text-[#12201b]">
+                Explain with Copilot <ExternalLink size={14} aria-hidden="true" />
+              </Link>
+              <Link href="/copilot" className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-white/15 px-4 py-3 text-xs font-bold text-white">
+                Research deeper <FileText size={14} aria-hidden="true" />
+              </Link>
+              <button
+                type="button"
+                className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-white/15 px-4 py-3 text-xs font-bold text-white"
+                onClick={() => setAdvisorTarget({ type: "event", id: item.event_id, title: item.headline })}
+              >
+                Send case to advisor <Send size={14} aria-hidden="true" />
+              </button>
+            </div>
+            <p className="mt-3 flex items-center gap-2 text-[11px] text-white/55"><UserRoundCheck size={13} /> Human-in-the-loop, no trade command.</p>
           </section>
         </aside>
       </div>
+      <div className="mt-4">
+        <AttentionPipeline trace={assessment?.trace} score={item.relevance_score} decision={item.decision} />
+      </div>
+      <div className="mt-4">
+        <LikelyScenarios scenarios={query.data.likely_scenarios} watchEvents={query.data.calendar_watch_events} />
+      </div>
+      <AdvisorSheet target={advisorTarget} onClose={() => setAdvisorTarget(null)} />
     </div>
   );
 }

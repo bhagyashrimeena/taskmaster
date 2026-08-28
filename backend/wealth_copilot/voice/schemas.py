@@ -102,6 +102,27 @@ class VoiceTimelineContext(VoiceModel):
     summary: str
 
 
+class VoiceLikelyScenarioContext(VoiceModel):
+    scenario_id: str
+    symbol: str | None = None
+    title: str
+    scenario_type: str
+    likelihood_label: str
+    confidence: str
+    why_it_could_happen: str
+    what_to_monitor: str
+    portfolio_relevance: str
+
+
+class VoiceWatchEventContext(VoiceModel):
+    event_id: str
+    symbol: str | None = None
+    title: str
+    scheduled_for: datetime
+    reminder_copy: str
+    status: str
+
+
 class VoicePreviousTurnContext(VoiceModel):
     user: str
     assistant_summary: str | None = None
@@ -120,6 +141,14 @@ class VoicePinnedContext(VoiceModel):
     interrupted_turn_summary: str | None = None
 
 
+class VoicePreferenceContext(VoiceModel):
+    alert_sensitivity: str = "balanced"
+    minimum_attention_outcome: str = "INVESTIGATE"
+    voice_style: str = "simple_advisor"
+    answer_length: str = "short"
+    focus_areas: list[str] = Field(default_factory=list)
+
+
 class VoiceContext(VoiceModel):
     conversation_id: str
     mode: str
@@ -132,6 +161,9 @@ class VoiceContext(VoiceModel):
     attention_summary: VoiceAttentionContext
     active_cases: list[VoiceCaseContext]
     relevant_stories: list[VoiceStoryContext]
+    likely_scenarios: list[VoiceLikelyScenarioContext] = Field(default_factory=list)
+    watch_events: list[VoiceWatchEventContext] = Field(default_factory=list)
     timeline: list[VoiceTimelineContext]
     previous_voice_turns: list[VoicePreviousTurnContext]
     pinned_context: VoicePinnedContext
+    preferences: VoicePreferenceContext = Field(default_factory=VoicePreferenceContext)

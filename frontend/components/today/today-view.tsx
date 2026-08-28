@@ -1,9 +1,11 @@
 "use client";
 
-import { ArrowRight, Check, Clock3, ShieldCheck } from "lucide-react";
+import { ArrowRight, Check, Clock3, Layers3, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 
+import { AttentionPipeline } from "@/components/attention-pipeline";
 import { AudioBriefControl } from "@/components/audio-brief";
+import { LikelyScenarios } from "@/components/likely-scenarios";
 import { FinancialValue, PercentChange } from "@/components/primitives/financial-value";
 import { ErrorState, LoadingState } from "@/components/primitives/states";
 import { AttentionCard } from "@/components/today/attention-card";
@@ -51,9 +53,42 @@ export function TodayView() {
             </article>
           )}
           {storyItems.slice(0, 2).map((item) => <AttentionCard key={item.item_id} item={item}/>)}
+          <AttentionPipeline
+            compact
+            score={eventItems[0]?.relevance_score ?? storyItems[0]?.relevance_score}
+            decision={eventItems[0]?.status ?? (storyItems.length ? "MONITOR" : "IGNORE")}
+          />
+          <LikelyScenarios scenarios={data.likely_scenarios} watchEvents={data.calendar_watch_events} compact />
         </div>
 
         <aside className="product-card content-start p-5">
+          <section className="mb-5">
+            <div className="flex items-center gap-3">
+              <span className="grid size-10 place-items-center rounded-xl bg-brand-soft text-brand"><Layers3 size={18}/></span>
+              <div>
+                <span className="section-kicker">Rich portfolio context</span>
+                <h2 className="section-title mt-1 text-lg">What the agent knows</h2>
+              </div>
+            </div>
+            <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
+              <div className="rounded-xl bg-background/80 px-3 py-2">
+                <span className="block text-[9px] font-bold uppercase tracking-wider text-muted">Holdings</span>
+                <strong>{data.portfolio.holdings_count}</strong>
+              </div>
+              <div className="rounded-xl bg-background/80 px-3 py-2">
+                <span className="block text-[9px] font-bold uppercase tracking-wider text-muted">Sectors</span>
+                <strong>{data.portfolio.sector_exposure.length}</strong>
+              </div>
+              <div className="rounded-xl bg-background/80 px-3 py-2">
+                <span className="block text-[9px] font-bold uppercase tracking-wider text-muted">Assets</span>
+                <strong>{data.portfolio.asset_allocation.length || "—"}</strong>
+              </div>
+              <div className="rounded-xl bg-background/80 px-3 py-2">
+                <span className="block text-[9px] font-bold uppercase tracking-wider text-muted">Risk profile</span>
+                <strong>{data.portfolio.risk_profile ?? "Demo"}</strong>
+              </div>
+            </div>
+          </section>
           <section>
             <div className="flex items-center justify-between"><span className="section-kicker">Since this morning</span><Link href="/timeline" className="inline-flex min-h-11 items-center rounded-lg px-1 text-xs font-bold text-brand">Full timeline</Link></div>
             <div className="mt-4 grid">

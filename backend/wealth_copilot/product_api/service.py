@@ -12,8 +12,10 @@ from ..dashboard.service import dashboard_service
 from ..day.schemas import FinancialDayState, StepStatus
 from ..day.store import financial_day_store
 from ..events.schemas import EventAssessment, EventDecision
+from ..followups import followup_service
 from ..interaction.memory import conversation_store
 from ..market_data import MarketDataProvider, get_market_data_provider
+from ..persistence import firestore_persistence
 from ..voice.service import voice_session_service
 from .schemas import (
     AlertCategory,
@@ -23,10 +25,12 @@ from .schemas import (
     AttentionItem,
     AttentionItemKind,
     CopilotBootstrapResponse,
+    PersistenceStatusResponse,
     PortfolioResponse,
     StreamSnapshot,
     TimelineResponse,
     TodayResponse,
+    WatchEventResponse,
 )
 
 
@@ -60,12 +64,15 @@ class ProductApiService:
 
     async def today(self) -> TodayResponse:
         dashboard = await dashboard_service.get_dashboard()
+        followup_service.ensure_from_stories(dashboard.daily_brief.stories)
         day = self._day()
         attention: list[AttentionItem] = []
+        cases_by_event = {case.trigger.event_id: case for case in day.financial_cases}
         event = dashboard.important_event
         if event is not None and event.notification_required:
             attention.append(AttentionItem(
                 item_id=event.event.event_id,
+                case_id=cases_by_event.get(event.event.event_id).case_id if cases_by_event.get(event.event.event_id) else None,
                 kind=AttentionItemKind.EVENT,
                 priority="high",
                 title=event.title,
@@ -119,6 +126,9 @@ class ProductApiService:
             morning_brief_id=day.morning_brief_id,
             evening_brief_id=day.evening_brief_id,
             daily_state=dashboard.daily_state,
+            news_snapshots=day.news_snapshots[-5:],
+            likely_scenarios=[item for item in day.likely_scenarios if item.status == "active"][:6],
+            calendar_watch_events=[item for item in day.calendar_watch_events if item.status == "scheduled"][:4],
             disclaimer=dashboard.disclaimer,
         )
 
@@ -218,6 +228,18 @@ class ProductApiService:
             intraday=intraday,
             benchmark=benchmark,
             sector=sector,
+            likely_scenarios=[
+                item
+                for item in day.likely_scenarios
+                if item.case_id == case.case_id
+                or item.symbol in {case.trigger.symbol, case.instrument, case.trigger.instrument}
+            ],
+            calendar_watch_events=[
+                item
+                for item in day.calendar_watch_events
+                if item.case_id == case.case_id
+                or item.symbol in {case.trigger.symbol, case.instrument, case.trigger.instrument}
+            ],
         )
 
     async def timeline(self) -> TimelineResponse:
@@ -239,10 +261,13 @@ class ProductApiService:
             next_checkpoint=next_checkpoint,
             timeline=day.timeline,
             financial_day=day,
+            likely_scenarios=[item for item in day.likely_scenarios if item.status == "active"],
+            calendar_watch_events=[item for item in day.calendar_watch_events if item.status == "scheduled"],
         )
 
     async def copilot_bootstrap(self, conversation_id: str | None = None) -> CopilotBootstrapResponse:
         dashboard = await dashboard_service.get_dashboard()
+        followup_service.ensure_from_stories(dashboard.daily_brief.stories)
         day = self._day()
         record = conversation_store.get(conversation_id) if conversation_id else None
         active_case_count = sum(
@@ -261,6 +286,16 @@ class ProductApiService:
             f"{len(dashboard.daily_brief.stories)} relevant stories, "
             f"and {active_case_count} active financial {'case' if active_case_count == 1 else 'cases'}."
         )
+        active_scenarios = [item for item in day.likely_scenarios if item.status == "active"]
+        watch_events = [item for item in day.calendar_watch_events if item.status == "scheduled"]
+        scenario_context = None
+        if active_scenarios:
+            lead = active_scenarios[0]
+            scenario_context = (
+                f"{len(active_scenarios)} scenarios to monitor are active; "
+                f"lead scenario is {lead.symbol or 'portfolio'}: {lead.title}. "
+                "Scenarios are not predictions or investment advice."
+            )
         if record and record.active_event_id:
             context += f" Continuing event {record.active_event_id}."
         elif record and record.active_story_id:
@@ -283,6 +318,34 @@ class ProductApiService:
                 if voice_session_service.configured()
                 else "Live call is not configured yet."
             ),
+            likely_scenario_count=len(active_scenarios),
+            watch_event_count=len(watch_events),
+            scenario_context=scenario_context,
+        )
+
+    def create_watch_event(self, request) -> WatchEventResponse:
+        event = followup_service.create_watch_event(
+            title=request.title,
+            description=request.description,
+            symbol=request.symbol,
+            story_id=request.story_id,
+            case_id=request.case_id,
+            scenario_id=request.scenario_id,
+            trigger_type=request.trigger_type,
+            created_by="user",
+        )
+        return WatchEventResponse(
+            event=event,
+            external_calendar_synced=False,
+            message="Internal watch event added. Google Calendar sync is not configured.",
+        )
+
+    @staticmethod
+    def persistence_status() -> PersistenceStatusResponse:
+        enabled = firestore_persistence.configured()
+        return PersistenceStatusResponse(
+            firestore_enabled=enabled,
+            reason=None if enabled else firestore_persistence.disabled_reason,
         )
 
     def stream_snapshot(self) -> StreamSnapshot:

@@ -11,6 +11,7 @@ from ..dashboard.service import dashboard_service
 from ..events import EventDecisionEngine, daily_event_store, get_event_fixture
 from ..events.schemas import EventAssessment, EventDecision, EventSeverity
 from ..cases import FinancialCaseStatus, financial_case_service
+from ..followups import followup_service
 from ..market_data import MarketDataProvider, get_market_data_provider
 from ..media.schemas import AudioBriefType
 from ..media.service import media_service
@@ -217,6 +218,7 @@ class DayOrchestrator:
                 state.attention_summary = dashboard.attention_summary
 
             self.store.update(mutate, selected)
+            followup_service.ensure_from_stories(dashboard.daily_brief.stories, selected)
             return self._step_complete(
                 selected,
                 "morning",
@@ -423,6 +425,8 @@ class DayOrchestrator:
                 run_id=day_state.run_id,
             )
             self.record_event(assessment, selected)
+            dashboard = await dashboard_service.get_dashboard()
+            followup_service.ensure_from_stories(dashboard.daily_brief.stories, selected)
             return self._step_complete(
                 selected,
                 "event",
@@ -721,6 +725,7 @@ class DayOrchestrator:
             for rank, item in enumerate(candidates, 1):
                 item.relevance_rank = rank
             selected_events = candidates[:2]
+            followup_service.ensure_reliance_watch_event(selected)
             self.store.update(lambda state: setattr(state, "tomorrow_events", selected_events), selected)
             return self._step_complete(
                 selected, "tomorrow", f"{len(selected_events)} portfolio-relevant events ranked for tomorrow.", [item.event_id for item in selected_events]

@@ -5,10 +5,15 @@ import type {
   AlertInboxResponse,
   CopilotBootstrapResponse,
   CopilotReply,
+  OnboardingInferenceInput,
+  OnboardingProfileResponse,
+  OnboardingSession,
   PortfolioResponse,
+  SuggestedProfile,
   TimelineResponse,
   TodayResponse,
   VoiceSessionResponse,
+  WatchEventResponse,
 } from "../product-types";
 
 const base = "/api/backend/v1";
@@ -62,3 +67,26 @@ export const createVoiceSession = (conversationId?: string | null, currentCaseId
   });
 
 export const productEventStreamUrl = "/api/events/stream";
+
+export const createWatchEvent = (input: {
+  title: string;
+  description: string;
+  symbol?: string | null;
+  story_id?: string | null;
+  case_id?: string | null;
+  scenario_id?: string | null;
+  trigger_type?: string;
+}) => postJson<WatchEventResponse>("/watch-events", input);
+
+export const inferOnboardingProfile = (input: OnboardingInferenceInput) =>
+  postJson<SuggestedProfile>("/onboarding/infer", input);
+
+export const saveOnboardingProfile = (input: {
+  user_id?: string;
+  raw_inputs: OnboardingInferenceInput;
+  suggested_profile: SuggestedProfile;
+  final_profile: Record<string, unknown>;
+}) => postJson<OnboardingSession>("/onboarding/profile", input);
+
+export const getOnboardingProfile = (userId = "demo_user") =>
+  getJson<OnboardingProfileResponse>(`/onboarding/profile?user_id=${encodeURIComponent(userId)}`);

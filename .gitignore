@@ -20,6 +20,7 @@ htmlcov/
 # Node and Next.js output
 frontend/node_modules/
 frontend/.next/
+frontend/.next-validation/
 frontend/out/
 frontend/tsconfig.tsbuildinfo
 

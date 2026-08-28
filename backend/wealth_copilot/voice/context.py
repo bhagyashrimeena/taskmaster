@@ -9,17 +9,21 @@ from ..day.schemas import StepStatus
 from ..day.store import financial_day_store
 from ..events.schemas import EventAssessment
 from ..interaction.memory import conversation_store
+from ..onboarding import onboarding_service
 from .schemas import (
     VoiceAttentionContext,
     VoiceCaseContext,
     VoiceContext,
     VoiceHoldingContext,
+    VoiceLikelyScenarioContext,
     VoicePinnedContext,
     VoicePortfolioContext,
+    VoicePreferenceContext,
     VoicePreviousTurnContext,
     VoiceSectorContext,
     VoiceStoryContext,
     VoiceTimelineContext,
+    VoiceWatchEventContext,
 )
 
 
@@ -169,6 +173,18 @@ async def build_voice_context(conversation_id: str, mode: str = "call") -> Voice
         for step in day.timeline
         if step.status in {StepStatus.COMPLETE, StepStatus.RUNNING}
     ][-5:]
+    preferences = VoicePreferenceContext()
+    onboarding = onboarding_service.get("demo_user")
+    if onboarding is not None:
+        agent_preferences = onboarding.final_profile.get("agent_preferences", {})
+        voice_preferences = agent_preferences.get("voice_preferences", {}) if isinstance(agent_preferences, dict) else {}
+        preferences = VoicePreferenceContext(
+            alert_sensitivity=agent_preferences.get("alert_sensitivity", "balanced") if isinstance(agent_preferences, dict) else "balanced",
+            minimum_attention_outcome=agent_preferences.get("minimum_attention_outcome", "INVESTIGATE") if isinstance(agent_preferences, dict) else "INVESTIGATE",
+            voice_style=voice_preferences.get("voice_style", "simple_advisor") if isinstance(voice_preferences, dict) else "simple_advisor",
+            answer_length=voice_preferences.get("answer_length", "short") if isinstance(voice_preferences, dict) else "short",
+            focus_areas=agent_preferences.get("focus_areas", []) if isinstance(agent_preferences, dict) else [],
+        )
 
     return VoiceContext(
         conversation_id=conversation_id,
@@ -232,7 +248,35 @@ async def build_voice_context(conversation_id: str, mode: str = "call") -> Voice
             )
             for story in dashboard.daily_brief.stories[:5]
         ],
+        likely_scenarios=[
+            VoiceLikelyScenarioContext(
+                scenario_id=item.scenario_id,
+                symbol=item.symbol,
+                title=item.title,
+                scenario_type=item.scenario_type,
+                likelihood_label=item.likelihood_label,
+                confidence=item.confidence,
+                why_it_could_happen=item.why_it_could_happen,
+                what_to_monitor=item.what_to_monitor,
+                portfolio_relevance=item.portfolio_relevance,
+            )
+            for item in day.likely_scenarios
+            if item.status == "active"
+        ][:6],
+        watch_events=[
+            VoiceWatchEventContext(
+                event_id=item.event_id,
+                symbol=item.symbol,
+                title=item.title,
+                scheduled_for=item.scheduled_for,
+                reminder_copy=item.reminder_copy,
+                status=item.status,
+            )
+            for item in day.calendar_watch_events
+            if item.status == "scheduled"
+        ][:4],
         timeline=timeline,
         previous_voice_turns=_previous_turns(conversation_id),
         pinned_context=_pinned_context(conversation_id, active_cases),
+        preferences=preferences,
     )

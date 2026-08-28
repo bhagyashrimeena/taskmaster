@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
   advanceFinancialDayClock,
+  getOnboardingProfile,
   getAlert,
   getAlerts,
   getCopilotBootstrap,
@@ -12,11 +13,13 @@ import {
   getToday,
   getFinancialDayClock,
   pauseFinancialDayClock,
+  inferOnboardingProfile,
   restartFinancialDayClock,
+  saveOnboardingProfile,
   startFinancialDayClock,
 } from "@/lib/api/product";
 import type { FinancialDayClockState } from "@/lib/types";
-import type { AlertCategory } from "@/lib/product-types";
+import type { AlertCategory, OnboardingInferenceInput, SuggestedProfile } from "@/lib/product-types";
 import { productKeys } from "@/lib/queries/keys";
 
 const common = {
@@ -81,4 +84,33 @@ export function useCopilotBootstrap(conversationId?: string | null) {
     queryFn: () => getCopilotBootstrap(conversationId),
     ...common,
   });
+}
+
+export function useOnboardingProfile(userId = "demo_user") {
+  return useQuery({
+    queryKey: productKeys.onboarding(userId),
+    queryFn: () => getOnboardingProfile(userId),
+    ...common,
+  });
+}
+
+export function useOnboardingControls(userId = "demo_user") {
+  const queryClient = useQueryClient();
+  const infer = useMutation({
+    mutationFn: (input: OnboardingInferenceInput) => inferOnboardingProfile({ user_id: userId, ...input }),
+  });
+  const save = useMutation({
+    mutationFn: (input: {
+      raw_inputs: OnboardingInferenceInput;
+      suggested_profile: SuggestedProfile;
+      final_profile: Record<string, unknown>;
+    }) => saveOnboardingProfile({ user_id: userId, ...input }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: productKeys.onboarding(userId) });
+      queryClient.invalidateQueries({ queryKey: productKeys.copilot(null) });
+      queryClient.invalidateQueries({ queryKey: productKeys.timeline });
+      queryClient.invalidateQueries({ queryKey: productKeys.today });
+    },
+  });
+  return { infer, save, pending: infer.isPending || save.isPending };
 }

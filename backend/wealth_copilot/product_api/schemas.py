@@ -7,7 +7,15 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from ..cases.schemas import FinancialCase, FinancialCasePriority, FinancialCaseStatus
 from ..dashboard.schemas import DailyBriefView, PortfolioView
-from ..day.schemas import DayRunMode, DayStatus, DayTimelineStep, FinancialDayState
+from ..day.schemas import (
+    CalendarWatchEvent,
+    DayRunMode,
+    DayStatus,
+    DayTimelineStep,
+    FinancialDayState,
+    LikelyScenario,
+    NewsSnapshot,
+)
 from ..events.schemas import EventAssessment, EventDecision
 from ..interaction.schemas import DailyInteractionView
 from ..market_data.schemas import IndexQuote, IntradayPoint, SectorSnapshot
@@ -24,6 +32,7 @@ class AttentionItemKind(StrEnum):
 
 class AttentionItem(ProductModel):
     item_id: str
+    case_id: str | None = None
     kind: AttentionItemKind
     priority: str
     title: str
@@ -52,6 +61,9 @@ class TodayResponse(ProductModel):
     morning_brief_id: str | None = None
     evening_brief_id: str | None = None
     daily_state: DailyInteractionView
+    news_snapshots: list[NewsSnapshot] = Field(default_factory=list)
+    likely_scenarios: list[LikelyScenario] = Field(default_factory=list)
+    calendar_watch_events: list[CalendarWatchEvent] = Field(default_factory=list)
     disclaimer: str
 
 
@@ -110,6 +122,8 @@ class AlertDetailResponse(ProductModel):
     intraday: list[IntradayPoint] = Field(default_factory=list)
     benchmark: IndexQuote | None = None
     sector: SectorSnapshot | None = None
+    likely_scenarios: list[LikelyScenario] = Field(default_factory=list)
+    calendar_watch_events: list[CalendarWatchEvent] = Field(default_factory=list)
 
 
 class TimelineResponse(ProductModel):
@@ -125,6 +139,8 @@ class TimelineResponse(ProductModel):
     next_checkpoint: DayTimelineStep | None = None
     timeline: list[DayTimelineStep]
     financial_day: FinancialDayState
+    likely_scenarios: list[LikelyScenario] = Field(default_factory=list)
+    calendar_watch_events: list[CalendarWatchEvent] = Field(default_factory=list)
 
 
 class CopilotBootstrapResponse(ProductModel):
@@ -141,6 +157,30 @@ class CopilotBootstrapResponse(ProductModel):
     saved_event_count: int = Field(ge=0)
     voice_call_enabled: bool = False
     voice_call_reason: str | None = None
+    likely_scenario_count: int = Field(default=0, ge=0)
+    watch_event_count: int = Field(default=0, ge=0)
+    scenario_context: str | None = None
+
+
+class CreateWatchEventRequest(ProductModel):
+    title: str
+    description: str
+    symbol: str | None = None
+    story_id: str | None = None
+    case_id: str | None = None
+    scenario_id: str | None = None
+    trigger_type: str = "user_requested"
+
+
+class WatchEventResponse(ProductModel):
+    event: CalendarWatchEvent
+    external_calendar_synced: bool = False
+    message: str
+
+
+class PersistenceStatusResponse(ProductModel):
+    firestore_enabled: bool
+    reason: str | None = None
 
 
 class ProductEventType(StrEnum):
